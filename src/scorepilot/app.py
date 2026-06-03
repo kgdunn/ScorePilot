@@ -16,6 +16,7 @@ from starlette.types import Scope
 
 from scorepilot.api import datasets, models
 from scorepilot.config import Settings, get_settings
+from scorepilot.dataset_store import DatasetStore
 from scorepilot.db import Base, make_engine, make_session_factory
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -63,7 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = make_session_factory(engine)
-    app.state.dataset_store = datasets.DatasetStore()
+    app.state.dataset_store = DatasetStore()
 
     @app.get("/api/health", tags=["meta"])
     def health() -> dict[str, str]:
