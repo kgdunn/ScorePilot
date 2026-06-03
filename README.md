@@ -49,6 +49,18 @@ PCA scores demo lives at `/playground`.
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
+**Quickest start (newcomers):** install `git`, `make`, `curl`, and Node 20+, then:
+
+```bash
+make setupenv   # one-time: installs uv, Python deps, and frontend deps
+make debug      # builds the UI and runs the server at http://127.0.0.1:8000
+```
+
+`make help` lists every task. For a from-scratch, zero-experience walkthrough
+(including installing the tools) see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+
+### Without make
+
 ```bash
 uv sync                 # create the environment
 uv run scorepilot       # boot uvicorn and open the browser
