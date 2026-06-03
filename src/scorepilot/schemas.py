@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from scorepilot.core import (
@@ -205,3 +208,70 @@ class PCAFitResponse(ApiModel):
     spe: list[float]
     t2_limit: float
     spe_limit: float
+
+
+# --- Models: the Hangar and Logbook ----------------------------------------
+
+
+class ModelSummary(ApiModel):
+    """A model variant as listed in the Hangar."""
+
+    id: int
+    kind: str
+    name: str | None
+    n_components: int
+    parent_id: int | None
+    dataset_id: str | None
+    created_at: datetime
+
+
+class LoadingsPayload(ApiModel):
+    """A loadings matrix, one row per variable."""
+
+    component_names: list[str]
+    variable_names: list[str]
+    data: list[list[float]]
+
+
+class ModelDiagnosticsModel(ApiModel):
+    """Diagnostics for a fitted model."""
+
+    kind: str
+    n_components: int
+    conf_level: float
+    component_names: list[str]
+    explained_variance: list[float]
+    r2_per_component: list[float]
+    r2_cumulative: list[float]
+    scores: ScoresPayload
+    x_loadings: LoadingsPayload
+    y_loadings: LoadingsPayload | None
+    hotellings_t2: list[float]
+    spe: list[float]
+    t2_limit: float
+    spe_limit: float
+    ellipse_x: list[float]
+    ellipse_y: list[float]
+    vip: dict[str, float]
+
+
+class ModelDetail(ApiModel):
+    """A model's Logbook: metadata, recipe, lineage, and diagnostics."""
+
+    summary: ModelSummary
+    preprocessing: dict
+    excluded_samples: list[int]
+    lineage: list[ModelSummary]
+    diagnostics: ModelDiagnosticsModel | None
+
+
+class FitModelRequest(ApiModel):
+    """Request to fit a model variant from a dataset and a preprocessing spec."""
+
+    dataset_id: str
+    kind: Literal["PCA", "PLS"] = "PCA"
+    n_components: int = Field(ge=1)
+    conf_level: float = Field(default=0.95, gt=0.0, lt=1.0)
+    name: str | None = None
+    parent_id: int | None = None
+    spec: PreprocessingSpecModel | None = None
