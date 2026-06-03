@@ -97,4 +97,4 @@ uv run alembic revision --autogenerate -m "message" # create a new migration
 
 ## License
 
-BSD 3-Clause. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

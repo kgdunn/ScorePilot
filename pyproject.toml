@@ -8,14 +8,14 @@ version = "0.1.0"
 description = "Web-based tool for PCA/PLS model analysis in chemometrics."
 readme = "README.md"
 requires-python = ">=3.12"
-license = "BSD-3-Clause"
+license = "MIT"
 authors = [{ name = "Kevin Dunn" }]
 keywords = ["chemometrics", "PCA", "PLS", "multivariate", "process analytics"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: FastAPI",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: BSD License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
 ]
