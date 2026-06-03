@@ -51,3 +51,36 @@ export function scoresScatterOption(
     ]
   };
 }
+
+/** Build a frequency histogram from numpy-style counts and bin edges. */
+export function histogramOption(counts: number[], edges: number[]): EChartsOption {
+  const categories = counts.map((_, i) => {
+    const lo = edges[i];
+    const hi = edges[i + 1];
+    return `${Number(lo).toPrecision(3)}`.concat('–', `${Number(hi).toPrecision(3)}`);
+  });
+  return {
+    grid: { left: 48, right: 16, top: 16, bottom: 60 },
+    tooltip: { trigger: 'axis' },
+    xAxis: {
+      type: 'category',
+      data: categories,
+      axisLabel: { rotate: 45, fontSize: 10, hideOverlap: true }
+    },
+    yAxis: { type: 'value', name: 'count' },
+    series: [{ type: 'bar', data: counts, itemStyle: { color: '#3aa757' }, barWidth: '99%' }]
+  };
+}
+
+/** Build a sequence (order-of-acquisition) line plot. */
+export function sequenceOption(values: (number | null)[]): EChartsOption {
+  return {
+    grid: { left: 48, right: 16, top: 16, bottom: 40 },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: values.map((_, i) => i + 1), name: 'order' },
+    yAxis: { type: 'value' },
+    series: [
+      { type: 'line', data: values, showSymbol: false, lineStyle: { color: '#2b6cb0' } }
+    ]
+  };
+}

@@ -1,10 +1,172 @@
 // Typed helpers for the ScorePilot HTTP API.
 
-export interface DatasetSummary {
+export type ColumnType = 'quantitative' | 'qualitative' | 'datetime' | 'unknown';
+export type IdentifierRole = 'none' | 'primary' | 'secondary' | 'class';
+export type TransformKind =
+  | 'none'
+  | 'linear'
+  | 'log'
+  | 'neglog'
+  | 'logit'
+  | 'exponential'
+  | 'power';
+export type ScalingKind = 'none' | 'unit_variance' | 'pareto';
+
+export interface ColumnMeta {
+  name: string;
+  column_type: ColumnType;
+  identifier_role: IdentifierRole;
+}
+
+export interface DatasetDetail {
   dataset_id: string;
+  name: string;
+  source: string;
+  sheet: string | null;
+  sheets: string[];
   n_rows: number;
   n_columns: number;
-  columns: string[];
+  primary_id: string | null;
+  columns: ColumnMeta[];
+}
+
+export interface GridWindow {
+  row_offset: number;
+  column_names: string[];
+  row_identifiers: (string | null)[];
+  cells: (string | null)[][];
+}
+
+export interface VariableInspector {
+  name: string;
+  column_type: ColumnType;
+  n: number;
+  n_missing: number;
+  pct_missing: number;
+  n_unique: number;
+  mean: number | null;
+  std: number | null;
+  minimum: number | null;
+  maximum: number | null;
+  median: number | null;
+  q25: number | null;
+  q75: number | null;
+  skewness: number | null;
+  min_max_ratio: number | null;
+  suggested_transform: TransformKind;
+  histogram_counts: number[];
+  histogram_edges: number[];
+  sequence: (number | null)[];
+}
+
+export interface ColumnQuality {
+  name: string;
+  n_missing: number;
+  pct_missing: number;
+  n_invalid: number;
+  invalid_rows: number[];
+  exceeds_tolerance: boolean;
+}
+
+export interface ObservationQuality {
+  index: number;
+  identifier: string | null;
+  n_missing: number;
+  pct_missing: number;
+}
+
+export interface DuplicateIdentifier {
+  value: string;
+  rows: number[];
+}
+
+export interface QualityReport {
+  n_rows: number;
+  n_columns: number;
+  n_missing_cells: number;
+  pct_missing: number;
+  primary_id_unique: boolean;
+  duplicate_primary_ids: DuplicateIdentifier[];
+  columns: ColumnQuality[];
+  observations_exceeding: ObservationQuality[];
+}
+
+async function asJson<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let detail: unknown = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      // no JSON body
+    }
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+  }
+  return (await response.json()) as T;
+}
+
+export async function uploadDataset(file: File, sheet?: string): Promise<DatasetDetail> {
+  const form = new FormData();
+  form.append('file', file);
+  const query = sheet ? `?sheet=${encodeURIComponent(sheet)}` : '';
+  return asJson(await fetch(`/api/datasets${query}`, { method: 'POST', body: form }));
+}
+
+export async function listDatasets(): Promise<DatasetDetail[]> {
+  return asJson(await fetch('/api/datasets'));
+}
+
+export async function getDataset(id: string): Promise<DatasetDetail> {
+  return asJson(await fetch(`/api/datasets/${id}`));
+}
+
+export async function patchColumn(
+  id: string,
+  column: string,
+  update: { column_type?: ColumnType; identifier_role?: IdentifierRole }
+): Promise<DatasetDetail> {
+  return asJson(
+    await fetch(`/api/datasets/${id}/columns/${encodeURIComponent(column)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(update)
+    })
+  );
+}
+
+/** Fetch the full grid by paging the windowed endpoint. */
+export async function getGridAll(id: string, form: 'raw' | 'scaled' = 'raw'): Promise<GridWindow> {
+  const pageSize = 1000;
+  let offset = 0;
+  const cells: (string | null)[][] = [];
+  const rowIds: (string | null)[] = [];
+  let columnNames: string[] = [];
+  for (;;) {
+    const window = await asJson<GridWindow>(
+      await fetch(`/api/datasets/${id}/grid?row_offset=${offset}&row_limit=${pageSize}&form=${form}`)
+    );
+    columnNames = window.column_names;
+    cells.push(...window.cells);
+    rowIds.push(...window.row_identifiers);
+    if (window.cells.length < pageSize) break;
+    offset += pageSize;
+  }
+  return { row_offset: 0, column_names: columnNames, row_identifiers: rowIds, cells };
+}
+
+export async function getVariable(
+  id: string,
+  column: string,
+  transform: TransformKind = 'none'
+): Promise<VariableInspector> {
+  const query = transform === 'none' ? '' : `?transform=${transform}`;
+  return asJson(
+    await fetch(`/api/datasets/${id}/variables/${encodeURIComponent(column)}${query}`)
+  );
+}
+
+export async function getQuality(id: string): Promise<QualityReport> {
+  return asJson(await fetch(`/api/datasets/${id}/quality`));
 }
 
 export interface ScoresPayload {
@@ -17,7 +179,6 @@ export interface PCAFitResponse {
   model_id: number;
   kind: string;
   n_components: number;
-  preprocessing: string;
   conf_level: number;
   component_names: string[];
   explained_variance: number[];
@@ -29,32 +190,12 @@ export interface PCAFitResponse {
   spe_limit: number;
 }
 
-async function asJson<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    let detail: unknown = response.statusText;
-    try {
-      const body = await response.json();
-      detail = body?.detail ?? detail;
-    } catch {
-      // response had no JSON body; keep the status text.
-    }
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
-  }
-  return (await response.json()) as T;
-}
-
-export async function uploadDataset(file: File): Promise<DatasetSummary> {
-  const form = new FormData();
-  form.append('file', file);
-  const response = await fetch('/api/datasets', { method: 'POST', body: form });
-  return asJson<DatasetSummary>(response);
-}
-
 export async function fitPca(datasetId: string, nComponents: number): Promise<PCAFitResponse> {
-  const response = await fetch('/api/models/pca', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ dataset_id: datasetId, n_components: nComponents })
-  });
-  return asJson<PCAFitResponse>(response);
+  return asJson(
+    await fetch('/api/models/pca', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dataset_id: datasetId, n_components: nComponents })
+    })
+  );
 }
