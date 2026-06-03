@@ -6,6 +6,7 @@ FastAPI, SQLAlchemy, or any other web/DB dependency: the boundary is
 load-bearing and keeps the numerics independently testable.
 """
 
+from scorepilot.core.modeling import ModelDiagnostics, fit_model
 from scorepilot.core.pca import PCAResult, fit_pca
 from scorepilot.core.preprocessing import Preprocessing, prepare
 from scorepilot.core.profiling import (
@@ -35,6 +36,7 @@ __all__ = [
     "AppliedWorkset",
     "ColumnType",
     "IdentifierRole",
+    "ModelDiagnostics",
     "PCAResult",
     "Preprocessing",
     "PreprocessingSpec",
@@ -45,6 +47,7 @@ __all__ = [
     "VariableTransform",
     "apply_spec",
     "apply_transform",
+    "fit_model",
     "fit_pca",
     "histogram",
     "infer_column_type",
