@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated Svelte bundle (built into the wheel by CI/release, never committed).
+# Keep the committed placeholder so the app boots without a frontend build.
+/src/scorepilot/web/*
+!/src/scorepilot/web/index.html
+
+# Frontend tooling
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
