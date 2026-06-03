@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from scorepilot.dataset_store import DatasetStore
 from scorepilot.db import SqlModelRepository, session_scope
-
-if TYPE_CHECKING:
-    from scorepilot.api.datasets import DatasetStore
 
 
 def get_dataset_store(request: Request) -> DatasetStore:
@@ -32,5 +30,5 @@ def get_repository(
     return SqlModelRepository(session)
 
 
-DatasetStoreDep = Annotated["DatasetStore", Depends(get_dataset_store)]
+DatasetStoreDep = Annotated[DatasetStore, Depends(get_dataset_store)]
 RepositoryDep = Annotated[SqlModelRepository, Depends(get_repository)]

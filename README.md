@@ -26,9 +26,40 @@ a single pip/uvx-installable package.
 The packaged app is **one process**: FastAPI serves `/api` and the built static
 frontend at `/`. No Node is required at runtime.
 
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a fuller description,
+including the dataset / preprocessing-spec split and the reusable data grid.
+
+## What you can do today
+
+- **Import** a CSV or Excel file; every column is kept and its data type
+  (quantitative / qualitative / date-time) is inferred.
+- **Explore** the data in a virtualized grid: assign identifier roles
+  (primary / secondary / class), choose X / Y variables, and exclude observations
+  (rows) or variables (columns).
+- **Check data quality**: duplicate primary identifiers, invalid values in
+  quantitative columns, and missing data.
+- **Inspect** any variable: summary statistics, a frequency histogram, a sequence
+  plot, and a non-destructive transform preview, plus a raw vs autoscaled view.
+
+The dataset stays immutable; transforms, scaling, X/Y, and exclusions accumulate in
+a preprocessing recipe that will drive model variants in the next stage. A small
+PCA scores demo lives at `/playground`.
+
 ## Run it (local)
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+
+**Quickest start (newcomers):** install `git`, `make`, `curl`, and Node 20+, then:
+
+```bash
+make setupenv   # one-time: installs uv, Python deps, and frontend deps
+make debug      # builds the UI and runs the server at http://127.0.0.1:8000
+```
+
+`make help` lists every task. For a from-scratch, zero-experience walkthrough
+(including installing the tools) see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+
+### Without make
 
 ```bash
 uv sync                 # create the environment

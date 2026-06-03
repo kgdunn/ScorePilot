@@ -30,7 +30,10 @@ testing models on new data.
   Postgres in production, same interface for both.
 - **`api/`** — FastAPI routers. Thin layer translating HTTP ↔ core/db.
 - **`frontend/`** — SvelteKit (Svelte 5 runes) + Vite, ECharts for all plots.
-  Builds into `src/scorepilot/web`.
+  Builds into `src/scorepilot/web`. `frontend/src/lib/grid/` is a standalone,
+  dependency-free, domain-agnostic data grid intended to be reusable in other
+  apps — keep ScorePilot concepts (roles, quality) out of it and layer them on
+  via snippets/props in `Explorer.svelte`.
 - The packaged app is **one process**: FastAPI serves `/api` and the built
   static frontend at `/`.
 
@@ -83,6 +86,14 @@ During development, run uvicorn and the Vite dev server together.
   `np.savez_compressed` blob. If artifacts grow, swap the blob for an
   object-storage path behind the same repository method — nothing upstream
   should change.
+- **Datasets are immutable; preprocessing is a per-variant recipe.** A dataset
+  holds only intrinsic metadata (column data types, identifier roles, quality).
+  X/Y selection, row/column exclusions, transforms, and scaling live in a
+  `PreprocessingSpec` (`core/workset.py`), applied with `apply_spec(df, spec)`.
+  One dataset has many specs (one per model variant); a spec serializes into
+  `Model.preprocessing` and variants form the `parent_id` lineage. Never bake
+  transforms onto the dataset. Datasets are currently in-memory
+  (`dataset_store.py`) behind an interface a DB table can later implement.
 
 ## Working style
 

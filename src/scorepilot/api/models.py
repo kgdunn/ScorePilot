@@ -8,7 +8,13 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, status
 
 from scorepilot.api.deps import DatasetStoreDep, RepositoryDep
-from scorepilot.core import PCAResult, fit_pca
+from scorepilot.core import (
+    PCAResult,
+    Preprocessing,
+    PreprocessingSpec,
+    apply_spec,
+    fit_pca,
+)
 from scorepilot.db import Model
 from scorepilot.schemas import FitPCARequest, PCAFitResponse, ScoresPayload
 
@@ -32,7 +38,6 @@ def _to_response(model_id: int, result: PCAResult) -> PCAFitResponse:
         model_id=model_id,
         kind="PCA",
         n_components=result.n_components,
-        preprocessing=result.preprocessing,
         conf_level=result.conf_level,
         component_names=result.component_names,
         explained_variance=result.explained_variance.tolist(),
@@ -55,19 +60,25 @@ def fit_pca_model(
     store: DatasetStoreDep,
     repository: RepositoryDep,
 ) -> PCAFitResponse:
-    """Fit a PCA model from a previously uploaded dataset and persist it."""
-    frame = store.get(request.dataset_id)
-    if frame is None:
+    """Fit a PCA model from a dataset and a preprocessing spec, and persist it."""
+    dataset = store.get(request.dataset_id)
+    if dataset is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unknown dataset_id: {request.dataset_id}",
         )
 
+    if request.spec is None:
+        spec = PreprocessingSpec(x_columns=tuple(dataset.quantitative_columns()))
+    else:
+        spec = request.spec.to_core()
+
     try:
+        applied = apply_spec(dataset.raw, spec)
         result = fit_pca(
-            frame,
+            applied.X,
             request.n_components,
-            preprocessing=request.preprocessing,
+            preprocessing=Preprocessing.NONE,
             conf_level=request.conf_level,
         )
     except ValueError as exc:
@@ -81,8 +92,8 @@ def fit_pca_model(
             kind="PCA",
             name=request.name,
             n_components=result.n_components,
-            preprocessing={"method": result.preprocessing.value},
-            excluded_samples=[],
+            preprocessing=spec.to_dict(),
+            excluded_samples=list(spec.excluded_rows),
             params=_pack_params(result),
         )
     )

@@ -1,71 +1,116 @@
-"""Dataset upload endpoint and the in-memory dataset store.
+"""Dataset import and metadata endpoints.
 
-For this skeleton, uploaded datasets live in process memory keyed by a generated
-id; the fit endpoint references that id. Persisting datasets is a later concern -
-the store can be swapped for a DB/object-storage backing without changing the
-endpoints.
+Uploaded datasets live in an in-memory store keyed by a generated id. Import keeps
+every column (identifiers and qualitative columns included) and infers each
+column's data type. Roles like X/Y and exclusions are *not* set here - those are
+modelling choices captured in a preprocessing spec.
 """
 
 from __future__ import annotations
 
-import io
 from typing import Annotated
-from uuid import uuid4
 
-import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from scorepilot.api.deps import DatasetStoreDep
-from scorepilot.schemas import DatasetSummary
+from scorepilot.core import IdentifierRole
+from scorepilot.dataset_store import Dataset, load_table
+from scorepilot.schemas import ColumnMetaModel, ColumnUpdate, DatasetDetail
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 
-class DatasetStore:
-    """A simple in-memory registry of uploaded DataFrames."""
+def to_detail(dataset: Dataset) -> DatasetDetail:
+    """Build the API detail model for a dataset."""
+    return DatasetDetail(
+        dataset_id=dataset.id,
+        name=dataset.name,
+        source=dataset.source,
+        sheet=dataset.sheet,
+        sheets=dataset.sheets,
+        n_rows=dataset.n_rows,
+        n_columns=dataset.n_columns,
+        primary_id=dataset.primary_id,
+        columns=[
+            ColumnMetaModel(
+                name=c.name,
+                column_type=c.column_type,
+                identifier_role=c.identifier_role,
+            )
+            for c in dataset.columns
+        ],
+    )
 
-    def __init__(self) -> None:
-        self._frames: dict[str, pd.DataFrame] = {}
 
-    def add(self, frame: pd.DataFrame) -> str:
-        dataset_id = uuid4().hex
-        self._frames[dataset_id] = frame
-        return dataset_id
-
-    def get(self, dataset_id: str) -> pd.DataFrame | None:
-        return self._frames.get(dataset_id)
-
-
-@router.post("", response_model=DatasetSummary, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=DatasetDetail, status_code=status.HTTP_201_CREATED)
 async def upload_dataset(
     store: DatasetStoreDep,
-    file: Annotated[UploadFile, File(description="CSV with sample ids in column 1")],
-) -> DatasetSummary:
-    """Upload a CSV dataset.
-
-    The first column is treated as the sample (observation) identifier; the
-    remaining columns must be numeric variables.
-    """
+    file: Annotated[UploadFile, File(description="A CSV or Excel file")],
+    sheet: Annotated[str | None, Query(description="Excel sheet name")] = None,
+) -> DatasetDetail:
+    """Import a CSV or Excel file as a dataset."""
     raw = await file.read()
+    filename = file.filename or "dataset.csv"
     try:
-        frame = pd.read_csv(io.BytesIO(raw), index_col=0)
-    except (ValueError, pd.errors.ParserError) as exc:
+        frame, source, sheets, used = load_table(raw, filename, sheet)
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not parse CSV: {exc}",
+            detail=f"Could not parse file: {exc}",
         ) from exc
 
-    numeric = frame.select_dtypes("number")
-    if numeric.shape[1] == 0:
+    if frame.shape[1] == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No numeric variable columns found after the index column.",
+            detail="No columns found in the uploaded file.",
         )
 
-    dataset_id = store.add(numeric)
-    return DatasetSummary(
-        dataset_id=dataset_id,
-        n_rows=int(numeric.shape[0]),
-        n_columns=int(numeric.shape[1]),
-        columns=[str(c) for c in numeric.columns],
-    )
+    dataset = store.add(filename, frame, source=source, sheets=sheets, sheet=used)
+    return to_detail(dataset)
+
+
+@router.get("", response_model=list[DatasetDetail])
+def list_datasets(store: DatasetStoreDep) -> list[DatasetDetail]:
+    """List all imported datasets."""
+    return [to_detail(d) for d in store.list()]
+
+
+@router.get("/{dataset_id}", response_model=DatasetDetail)
+def get_dataset(dataset_id: str, store: DatasetStoreDep) -> DatasetDetail:
+    """Return one dataset's metadata."""
+    return to_detail(_require(store, dataset_id))
+
+
+@router.patch("/{dataset_id}/columns/{column}", response_model=DatasetDetail)
+def update_column(
+    dataset_id: str, column: str, update: ColumnUpdate, store: DatasetStoreDep
+) -> DatasetDetail:
+    """Update a column's data type or identifier role."""
+    dataset = _require(store, dataset_id)
+    meta = dataset.column(column)
+    if meta is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown column: {column}",
+        )
+
+    if update.column_type is not None:
+        meta.column_type = update.column_type
+    if update.identifier_role is not None:
+        if update.identifier_role is IdentifierRole.PRIMARY:
+            for other in dataset.columns:
+                if other.identifier_role is IdentifierRole.PRIMARY:
+                    other.identifier_role = IdentifierRole.NONE
+        meta.identifier_role = update.identifier_role
+
+    return to_detail(dataset)
+
+
+def _require(store: DatasetStoreDep, dataset_id: str) -> Dataset:
+    dataset = store.get(dataset_id)
+    if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown dataset_id: {dataset_id}",
+        )
+    return dataset
