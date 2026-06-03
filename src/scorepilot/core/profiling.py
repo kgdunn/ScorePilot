@@ -118,7 +118,7 @@ def variable_summary(series: pd.Series, column_type: ColumnType | None = None) -
     )
 
 
-def histogram(series: pd.Series, bins: int = 20) -> tuple[list[float], list[float]]:
+def histogram(series: pd.Series, bins: int = 20) -> tuple[list[int], list[float]]:
     """Return ``(counts, edges)`` for a frequency histogram of a numeric column.
 
     Empty or all-missing columns return empty lists.

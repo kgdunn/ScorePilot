@@ -125,6 +125,46 @@ class GridWindow(ApiModel):
     cells: list[list[str | None]]
 
 
+class ColumnQualityModel(ApiModel):
+    """Quality summary for one column."""
+
+    name: str
+    n_missing: int
+    pct_missing: float
+    n_invalid: int
+    invalid_rows: list[int]
+    exceeds_tolerance: bool
+
+
+class ObservationQualityModel(ApiModel):
+    """Quality summary for one flagged observation."""
+
+    index: int
+    identifier: str | None
+    n_missing: int
+    pct_missing: float
+
+
+class DuplicateIdentifierModel(ApiModel):
+    """A primary identifier shared by more than one observation."""
+
+    value: str
+    rows: list[int]
+
+
+class QualityReportModel(ApiModel):
+    """Aggregate data-quality report for a dataset."""
+
+    n_rows: int
+    n_columns: int
+    n_missing_cells: int
+    pct_missing: float
+    primary_id_unique: bool
+    duplicate_primary_ids: list[DuplicateIdentifierModel]
+    columns: list[ColumnQualityModel]
+    observations_exceeding: list[ObservationQualityModel]
+
+
 # --- Model fitting ----------------------------------------------------------
 
 

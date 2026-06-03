@@ -152,6 +152,43 @@ def test_fit_pca_too_many_components_is_422(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_quality_endpoint(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    report = client.get(f"/api/datasets/{dataset_id}/quality").json()
+    assert report["n_rows"] == 30
+    assert report["primary_id_unique"] is True
+    assert {c["name"] for c in report["columns"]} == {"sample", "v0", "v1", "v2", "v3"}
+
+
+def test_grid_raw_and_scaled(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+
+    raw = client.get(f"/api/datasets/{dataset_id}/grid?row_limit=5").json()
+    assert raw["column_names"] == ["sample", "v0", "v1", "v2", "v3"]
+    assert len(raw["cells"]) == 5
+    assert raw["row_identifiers"][0] == "obs0"
+
+    scaled = client.get(f"/api/datasets/{dataset_id}/grid?row_limit=5&form=scaled").json()
+    # Scaling changes the numeric column values but not the identifier column.
+    assert scaled["cells"][0][1] != raw["cells"][0][1]
+    assert scaled["cells"][0][0] == raw["cells"][0][0]
+
+
+def test_variable_inspector(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    inspector = client.get(f"/api/datasets/{dataset_id}/variables/v0").json()
+    assert inspector["column_type"] == "quantitative"
+    assert inspector["n"] == 30
+    assert sum(inspector["histogram_counts"]) == 30
+    assert len(inspector["sequence"]) == 30
+
+
+def test_variable_inspector_unknown_column_404(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    response = client.get(f"/api/datasets/{dataset_id}/variables/nope")
+    assert response.status_code == 404
+
+
 def test_spa_fallback_serves_index(client: TestClient) -> None:
     response = client.get("/some/client/route")
     assert response.status_code == 200

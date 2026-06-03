@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
-from scorepilot.api import datasets, models
+from scorepilot.api import datasets, exploration, models
 from scorepilot.config import Settings, get_settings
 from scorepilot.dataset_store import DatasetStore
 from scorepilot.db import Base, make_engine, make_session_factory
@@ -71,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(datasets.router, prefix="/api")
+    app.include_router(exploration.router, prefix="/api")
     app.include_router(models.router, prefix="/api")
 
     # Mount the static SPA last so it never shadows the API routes above.
