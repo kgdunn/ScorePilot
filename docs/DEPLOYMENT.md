@@ -1,9 +1,9 @@
-# Deploying ScorePilot (Hetzner, auto-deploy on merge)
+# Deploying ScorePilot (shared host, auto-deploy on merge)
 
-Every push to `main` builds a container image and deploys it to a Hetzner server,
-which serves the app over HTTPS on a public subdomain. Data is stored in
-**Postgres**. Nothing environment-specific lives in the repo - the server URL,
-domain, and credentials are GitHub secrets and a server-side `.env`.
+ScorePilot deploys to a server that **already runs a reverse proxy** (a host-level
+Caddy) fronting other apps. We therefore run only the **app + Postgres** in Docker,
+publish the app on a **loopback port**, and let the host proxy terminate TLS and
+route the subdomain to it. Every push to `main` rebuilds the image and redeploys.
 
 ## How it works
 
@@ -11,143 +11,135 @@ domain, and credentials are GitHub secrets and a server-side `.env`.
 push to main ──> GitHub Actions (deploy.yml)
                    1. build the Svelte frontend
                    2. build a Python image, push to GHCR (ghcr.io/kgdunn/scorepilot)
-                   3. scp deploy/ files to the server, then SSH:
-                        docker compose pull && docker compose up -d
-                 ──> Hetzner: Caddy (TLS) -> app -> Postgres
+                   3. scp deploy/docker-compose.yml to the server, then SSH:
+                        docker compose pull && docker compose up -d --remove-orphans
+                 ──> host Caddy (TLS) ──> 127.0.0.1:APP_PORT ──> app ──> Postgres
 ```
 
-The compose stack (`deploy/docker-compose.yml`) runs three services: `caddy`
-(automatic HTTPS + reverse proxy), `app` (the image), and `db` (Postgres 16 with a
-named volume). On start, the app runs `alembic upgrade head` then serves.
+The compose stack (`deploy/docker-compose.yml`) runs `app` (published on
+`127.0.0.1:${APP_PORT}`, default **8003**) and `db` (Postgres 16, named volume). On
+start the app runs `alembic upgrade head` then serves. **No Caddy/TLS in our
+stack** - the host's existing proxy handles HTTPS.
 
 ## One-time server setup
 
-On a fresh Hetzner VPS (Ubuntu 22.04+):
+On the host (as the `deploy` user; use `sudo` for system bits):
 
 ```bash
-# 1. Install Docker + the compose plugin
-curl -fsSL https://get.docker.com | sh
+# 1. Docker + compose plugin (skip if already installed)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker deploy        # let 'deploy' use Docker; re-login to apply
 
-# 2. Create the deploy directory
-sudo mkdir -p /opt/scorepilot && sudo chown "$USER" /opt/scorepilot
+# 2. Deploy directory owned by 'deploy'
+sudo mkdir -p /opt/scorepilot && sudo chown -R deploy:deploy /opt/scorepilot
 
-# 3. Create the environment file (copy the example from the repo, then edit)
-#    The compose stack reads /opt/scorepilot/.env
-nano /opt/scorepilot/.env
-```
-
-Fill `/opt/scorepilot/.env` using `deploy/.env.example` as the template:
-
-```ini
-DOMAIN=scorepilot.example.com
-TLS_EMAIL=you@example.com
+# 3. Environment file (compose reads it). Use a password with NO '$' characters.
+cat > /opt/scorepilot/.env <<EOF
+APP_PORT=8003
 POSTGRES_USER=scorepilot
-POSTGRES_PASSWORD=<long-random-secret>
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=scorepilot
+EOF
 ```
 
-4. **DNS:** point an `A` (and `AAAA` if you have IPv6) record for the subdomain at
-   the server's IP. Caddy obtains a Let's Encrypt certificate automatically once
-   the record resolves.
+Pick a **free** `APP_PORT` (check with `ss -tlnp | grep :8003`); other apps on the
+box already use 8000/8001/8002.
 
-5. **Firewall:** allow inbound `80` and `443` (Caddy needs both; 80 is used for the
-   ACME challenge and redirects to HTTPS).
+No firewall changes are needed - the host proxy already owns 80/443, and the app
+port is loopback-only.
 
-   ```bash
-   sudo ufw allow 80,443/tcp
-   ```
+### GitHub secrets and the deploy key
 
-6. **GHCR image access.** The deploy pulls `ghcr.io/kgdunn/scorepilot`. Easiest is
-   to make that package **public** (GitHub → your profile → Packages → scorepilot →
-   Package settings → Change visibility → Public). If you prefer to keep it private,
-   run `docker login ghcr.io` on the server once with a read-only PAT.
-
-## One-time GitHub setup
-
-Create a deploy SSH key and add three repository secrets.
+Generate a deploy key on the server and authorize it for the `deploy` user:
 
 ```bash
-# On your laptop: generate a dedicated key (no passphrase)
-ssh-keygen -t ed25519 -f scorepilot_deploy -C "scorepilot-deploy"
-
-# Add the PUBLIC key to the server account that runs Docker
-ssh-copy-id -i scorepilot_deploy.pub <DEPLOY_USER>@<SERVER_IP>
+ssh-keygen -t ed25519 -f ~/scorepilot_deploy -N "" -C scorepilot-deploy
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+cat ~/scorepilot_deploy.pub >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+cat ~/scorepilot_deploy   # copy this private key into the GitHub secret below
 ```
 
-Then in the repo: **Settings → Secrets and variables → Actions → New secret**:
+Repo → **Settings → Secrets and variables → Actions → Secrets**:
 
-| Secret           | Value                                  |
-| ---------------- | -------------------------------------- |
-| `DEPLOY_HOST`    | server IP or hostname                  |
-| `DEPLOY_USER`    | the SSH user (member of the docker group) |
-| `DEPLOY_SSH_KEY` | contents of the **private** `scorepilot_deploy` key |
+| Secret | Value |
+| --- | --- |
+| `DEPLOY_HOST` | server IP/hostname |
+| `DEPLOY_USER` | `deploy` |
+| `DEPLOY_SSH_KEY` | the full private key (BEGIN/END lines included) |
 
-No registry secret is needed - the build pushes to GHCR using the built-in
-`GITHUB_TOKEN`.
+Delete the private key from the server afterwards (`rm ~/scorepilot_deploy`).
+
+Also make the **GHCR package public** (your Packages → `scorepilot` → Package
+settings → Change visibility → Public) so the server can pull without logging in.
+
+## DNS
+
+Point the subdomain at the server. With Cloudflare, set the record to **DNS only
+(grey cloud)** so the host Caddy can obtain its own certificate:
+
+| Type | Name | Value | Proxy |
+| --- | --- | --- | --- |
+| A | `scorepilot` | server IPv4 | DNS only (grey) |
+
+Verify: `dig +short scorepilot.learnche.org` returns the server IP.
+
+## Wire it into the host Caddy
+
+Add a site block to the host Caddyfile (typically `/etc/caddy/Caddyfile`) - same
+shape as the other apps on the box:
+
+```caddyfile
+scorepilot.learnche.org {
+    reverse_proxy 127.0.0.1:8003
+}
+```
+
+Then reload: `sudo systemctl reload caddy`. Caddy fetches the Let's Encrypt
+certificate automatically once DNS resolves.
 
 ## First deploy
 
-Either merge a PR to `main`, or trigger it manually: **Actions → Deploy → Run
-workflow**. After it finishes, check:
+Merge to `main`, or **Actions → Deploy → Run workflow**. Then check:
 
 ```bash
-curl https://scorepilot.example.com/api/health   # -> {"status":"ok"}
+# on the server
+cd /opt/scorepilot && docker compose ps          # app + db should be Up/healthy
+curl -s http://127.0.0.1:8003/api/health          # -> {"status":"ok"}
+# from anywhere
+curl -s https://scorepilot.learnche.org/api/health
 ```
 
-Open `https://scorepilot.example.com` in any browser (including your phone).
+### Resetting the database (only if the password was changed after first run)
 
-## Rollback
-
-Images are tagged `latest` and `sha-<commit>`. To roll back, on the server:
+Postgres bakes `POSTGRES_PASSWORD` into its data volume on first init. If you
+change it later, the app and db will disagree (app crash-loops on auth). With no
+real data yet, reset the volume:
 
 ```bash
 cd /opt/scorepilot
-# pin a previous build
-sed -i 's#scorepilot:latest#scorepilot:sha-<good-commit>#' docker-compose.yml
-docker compose up -d
+docker compose down --remove-orphans
+docker volume rm scorepilot_pgdata
+docker compose up -d        # db re-initialises with the current .env password
 ```
 
-(The next merge resets the tag to `latest`.)
+## Rollback
+
+Images are tagged `latest` and `sha-<commit>`. To pin a previous build, edit the
+`app` image tag in `/opt/scorepilot/docker-compose.yml` and `docker compose up -d`.
+(The next merge resets it to `latest`.)
 
 ## Build / run the image locally
-
-Building the image requires the frontend to be built first (it is baked in):
 
 ```bash
 make image       # builds the frontend, then `docker build -t scorepilot:local .`
 make image-run   # runs it on http://localhost:8000 with a throwaway SQLite DB
 ```
 
-To exercise the Postgres path locally:
+## Notes
 
-```bash
-docker run -d --name sp-pg -e POSTGRES_PASSWORD=pw -e POSTGRES_USER=sp \
-  -e POSTGRES_DB=scorepilot -p 5433:5432 postgres:16
-SCOREPILOT_DATABASE_URL=postgresql+psycopg://sp:pw@127.0.0.1:5433/scorepilot \
-  uv run alembic upgrade head
-SCOREPILOT_DATABASE_URL=postgresql+psycopg://sp:pw@127.0.0.1:5433/scorepilot \
-  uv run scorepilot
-```
-
-## Notes and next steps
-
-- **Auth (planned).** The site is currently public with no login. Add HTTP basic
-  auth in `deploy/Caddyfile` when ready:
-
-  ```caddyfile
-  {$DOMAIN} {
-      basic_auth {
-          {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
-      }
-      reverse_proxy app:8000
-  }
-  ```
-
-  (Generate the hash with `docker run caddy caddy hash-password`.)
-- **Shared state.** It is a single app process: uploaded datasets are in memory and
-  models share one Postgres database, so concurrent users share state. Fine for
-  team testing; per-user isolation is a separate design (issue #6).
-- **Backups.** Postgres data lives in the `pgdata` volume. Back up with
-  `docker exec <db> pg_dump -U $POSTGRES_USER $POSTGRES_DB > backup.sql`.
-- **Resources.** PCA/PLS on typical datasets is light; a small Hetzner CX/CPX
-  instance is plenty.
+- **Auth (planned).** The site is public with no login. Add it at the host Caddy
+  with `basic_auth`, or in the app later.
+- **Shared state.** Single app process: datasets in memory, models in one Postgres
+  DB - concurrent users share state. Fine for team testing; per-user isolation is a
+  separate design (issue #6).
+- **Backups.** `docker exec scorepilot-db-1 pg_dump -U $POSTGRES_USER $POSTGRES_DB > backup.sql`.
