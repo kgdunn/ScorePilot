@@ -3,3 +3,8 @@ node_modules/
 build/
 .env
 .DS_Store
+
+# Playwright
+test-results/
+playwright-report/
+.playwright/

@@ -42,7 +42,13 @@
   <section class="panel">
     <h2>Open a dataset</h2>
     <p class="hint">Import a CSV or Excel file to explore it.</p>
-    <input type="file" accept=".csv,.xlsx,.xls" onchange={onFile} disabled={busy} />
+    <input
+      type="file"
+      data-testid="file-input"
+      accept=".csv,.xlsx,.xls"
+      onchange={onFile}
+      disabled={busy}
+    />
     {#if busy}<span class="hint">Uploading…</span>{/if}
     {#if error}<p class="error">{error}</p>{/if}
   </section>

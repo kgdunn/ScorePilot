@@ -72,7 +72,7 @@
   }
 </script>
 
-<div class="inspector">
+<div class="inspector" data-testid="inspector">
   <h3>{column}</h3>
   {#if error}<p class="error">{error}</p>{/if}
 
@@ -110,7 +110,7 @@
       </div>
 
       <h4>Frequency</h4>
-      <div class="chart" bind:this={histEl}></div>
+      <div class="chart" data-testid="hist-chart" bind:this={histEl}></div>
       <h4>Sequence</h4>
       <div class="chart" bind:this={seqEl}></div>
     {:else}
