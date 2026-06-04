@@ -11,7 +11,7 @@
   );
 </script>
 
-<div class="quality">
+<div class="quality" data-testid="quality">
   {#if report}
     <div class="summary">
       <span class:bad={!report.primary_id_unique}>

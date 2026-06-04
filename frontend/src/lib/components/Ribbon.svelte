@@ -80,7 +80,7 @@
     <span class="label">View</span>
   </div>
 
-  <div class="status">
+  <div class="status" data-testid="ribbon-status">
     <span>X: {xCount}</span>
     <span>Y: {yCount}</span>
     <span>excluded rows: {excludedRowCount}</span>

@@ -93,7 +93,7 @@
 
     {#if detail.diagnostics}
       {@const d = detail.diagnostics}
-      <section class="diagnostics">
+      <section class="diagnostics" data-testid="diagnostics">
         <div class="grid2">
           <div class="card">
             <h3>Scores (with T² limit)</h3>

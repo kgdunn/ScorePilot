@@ -213,7 +213,7 @@
   }
 </script>
 
-<div class="explorer">
+<div class="explorer" data-testid="explorer">
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="hint">Loading…</p>{/if}
 
@@ -257,10 +257,10 @@
           >
             {#snippet headerCell(col)}
               {#if col.id === '__id'}
-                <div class="hc"><strong>{col.header}</strong></div>
+                <div class="hc" data-col="__id"><strong>{col.header}</strong></div>
               {:else}
                 {@const meta = metaByName.get(col.id)}
-                <div class="hc">
+                <div class="hc" data-col={col.id}>
                   <strong>{col.id}</strong>
                   <span class="badge">{meta?.column_type ?? ''}</span>
                 </div>
@@ -296,7 +296,9 @@
         </label>
         <label>Components <input type="number" min="1" max="20" bind:value={fitComponents} /></label>
         <label>Name <input type="text" placeholder="optional" bind:value={fitName} /></label>
-        <button onclick={onFit} disabled={fitting}>{fitting ? 'Fitting…' : 'Fit model'}</button>
+        <button data-testid="fit-model" onclick={onFit} disabled={fitting}>
+          {fitting ? 'Fitting…' : 'Fit model'}
+        </button>
         <a class="hangar-link" href="/models">Hangar →</a>
       </div>
       <p class="hint">
