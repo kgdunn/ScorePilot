@@ -120,6 +120,21 @@ export async function getDataset(id: string): Promise<DatasetDetail> {
   return asJson(await fetch(`/api/datasets/${id}`));
 }
 
+export interface SampleInfo {
+  name: string;
+  title: string;
+  description: string;
+  source_url: string;
+}
+
+export async function listSamples(): Promise<SampleInfo[]> {
+  return asJson(await fetch('/api/datasets/samples'));
+}
+
+export async function loadSample(name: string): Promise<DatasetDetail> {
+  return asJson(await fetch(`/api/datasets/samples/${encodeURIComponent(name)}`, { method: 'POST' }));
+}
+
 export async function patchColumn(
   id: string,
   column: string,
