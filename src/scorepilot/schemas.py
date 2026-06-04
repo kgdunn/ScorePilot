@@ -55,6 +55,15 @@ class ColumnUpdate(ApiModel):
     identifier_role: IdentifierRole | None = None
 
 
+class SampleInfo(ApiModel):
+    """A bundled demo dataset offered on the home page."""
+
+    name: str
+    title: str
+    description: str
+    source_url: str
+
+
 # --- Preprocessing spec (per model variant) ---------------------------------
 
 

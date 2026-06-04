@@ -255,6 +255,24 @@ def test_get_unknown_model_is_404(client: TestClient) -> None:
     assert client.get("/api/models/999").status_code == 404
 
 
+def test_list_samples(client: TestClient) -> None:
+    names = {s["name"] for s in client.get("/api/datasets/samples").json()}
+    assert {"ldpe", "food-consumption"} <= names
+
+
+def test_load_sample(client: TestClient) -> None:
+    response = client.post("/api/datasets/samples/food-consumption")
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["n_rows"] == 16
+    # The unique "Country" column is auto-detected as the primary identifier.
+    assert body["primary_id"] == "Country"
+
+
+def test_load_unknown_sample_is_404(client: TestClient) -> None:
+    assert client.post("/api/datasets/samples/nope").status_code == 404
+
+
 def test_spa_fallback_serves_index(client: TestClient) -> None:
     response = client.get("/some/client/route")
     assert response.status_code == 200
