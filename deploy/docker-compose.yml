@@ -1,6 +1,7 @@
-# Production stack for the Hetzner host: the app, Postgres, and Caddy (TLS).
-# Values come from a server-side .env file (see .env.example) - nothing
-# environment-specific lives in the repository.
+# Production stack for a shared host that already runs a reverse proxy.
+# We run only the app + Postgres; the app is published on a loopback port and the
+# host's existing Caddy (or other proxy) terminates TLS and routes the subdomain
+# to it. Values come from a server-side .env file (see .env.example).
 
 services:
   db:
@@ -22,28 +23,14 @@ services:
     image: ghcr.io/kgdunn/scorepilot:latest
     environment:
       SCOREPILOT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    # Publish on loopback only; the host reverse proxy reaches it here.
+    # Override the host port with APP_PORT in .env if 8003 is taken.
+    ports:
+      - "127.0.0.1:${APP_PORT:-8003}:8000"
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
 
-  caddy:
-    image: caddy:2
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN}
-      TLS_EMAIL: ${TLS_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-    restart: unless-stopped
-
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:

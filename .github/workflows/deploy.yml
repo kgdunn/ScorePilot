@@ -76,7 +76,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: "deploy/docker-compose.yml,deploy/Caddyfile"
+          source: "deploy/docker-compose.yml"
           target: "/opt/scorepilot"
           strip_components: 1
 
@@ -89,5 +89,5 @@ jobs:
           script: |
             cd /opt/scorepilot
             docker compose pull
-            docker compose up -d
+            docker compose up -d --remove-orphans
             docker image prune -f
