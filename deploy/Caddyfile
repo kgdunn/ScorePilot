@@ -1,0 +1,7 @@
+# Caddy serves HTTPS for the public subdomain and proxies to the app container.
+# DOMAIN and TLS_EMAIL come from the server-side .env file.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:8000
+	tls {$TLS_EMAIL}
+}

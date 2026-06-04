@@ -126,6 +126,14 @@ uv run alembic upgrade head                         # apply migrations
 uv run alembic revision --autogenerate -m "message" # create a new migration
 ```
 
+## Deployment
+
+Pushes to `main` build a container image and auto-deploy it to a Hetzner server
+(Caddy for HTTPS, Postgres for storage), so you can test the latest build from any
+browser. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for server setup, the
+GitHub secrets to configure, and how to build/run the image locally
+(`make image` / `make image-run`).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

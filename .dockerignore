@@ -1,0 +1,21 @@
+# Keep the build context small and reproducible.
+.git
+.github
+.venv
+**/__pycache__
+*.py[cod]
+.ruff_cache
+.pytest_cache
+.mypy_cache
+
+# Node sources/outputs are not needed: the prebuilt bundle in src/scorepilot/web
+# is what gets baked into the image.
+frontend
+
+# Local databases and scratch
+*.db
+*.sqlite*
+dist
+docs
+deploy
+tests
