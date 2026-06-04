@@ -134,6 +134,9 @@ browser. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for server setup, the
 GitHub secrets to configure, and how to build/run the image locally
 (`make image` / `make image-run`).
 
+Merges to `main` can also publish a wheel to PyPI (off until enabled). See
+[`docs/PUBLISHING.md`](docs/PUBLISHING.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

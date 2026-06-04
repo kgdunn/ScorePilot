@@ -1,0 +1,60 @@
+name: Publish to PyPI
+
+# Publishes a wheel to PyPI on every push to main, once enabled. The job is gated
+# on the `PYPI_PUBLISH` repository variable so it does nothing until you have
+# configured PyPI Trusted Publishing and set the variable to "true" (see
+# docs/PUBLISHING.md). Each build gets a unique, increasing version derived from
+# the run number, so PyPI never sees a duplicate.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build & publish wheel
+    runs-on: ubuntu-latest
+    if: ${{ vars.PYPI_PUBLISH == 'true' }}
+    environment: pypi
+    permissions:
+      id-token: write # OIDC for PyPI Trusted Publishing
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend bundle
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set a unique build version
+        run: |
+          base=$(grep -E '^version = ' pyproject.toml | head -1 | sed -E 's/version = "([0-9]+\.[0-9]+).*/\1/')
+          version="${base}.${GITHUB_RUN_NUMBER}"
+          echo "Publishing version ${version}"
+          sed -i -E "0,/^version = \".*\"/s//version = \"${version}\"/" pyproject.toml
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # To target TestPyPI instead, set:
+          # repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
