@@ -18,10 +18,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -68,7 +68,7 @@ jobs:
     # Only deploy from the canonical repo, and skip if SSH secrets are absent.
     if: ${{ github.repository == 'kgdunn/ScorePilot' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Copy compose stack to the server
         uses: appleboy/scp-action@v0.1.7
