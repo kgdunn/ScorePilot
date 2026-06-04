@@ -95,6 +95,28 @@ During development, run uvicorn and the Vite dev server together.
   transforms onto the dataset. Datasets are currently in-memory
   (`dataset_store.py`) behind an interface a DB table can later implement.
 
+## Versioning (required on every PR)
+
+Every PR **must bump `version` in `pyproject.toml`** using semantic-version
+judgement:
+
+- **MAJOR** (`X.0.0`) - breaking API/behaviour changes.
+- **MINOR** (`0.X.0`) - new features, endpoints, or notable behaviour changes.
+- **PATCH** (`0.0.X`) - bug fixes, docs, chores, CI/tooling.
+
+Decide MAJOR vs MINOR vs PATCH from the change itself; when in doubt between two,
+pick the higher.
+
+Two mechanical rules that go with the bump:
+
+- **Refresh the lockfile in the same PR.** After editing the version, run
+  `uv lock` (or `uv sync`) and commit `uv.lock` so the recorded `scorepilot`
+  version matches `pyproject.toml` (CI installs with `uv sync --frozen`).
+- The **published** wheel is versioned `MAJOR.MINOR.<CI run number>` by
+  `publish.yml`, so the `MAJOR.MINOR` you set defines the released series; the
+  patch you write in `pyproject.toml` is a local marker (the run number supplies
+  the released patch).
+
 ## Working style
 
 - For non-trivial changes, propose a short plan and the affected files before
