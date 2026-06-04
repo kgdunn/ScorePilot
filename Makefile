@@ -144,6 +144,14 @@ check: ## Run all quality gates (lint, types, tests).
 migrate: ## Apply database migrations (alembic upgrade head).
 	uv run alembic upgrade head
 
+.PHONY: image
+image: build-frontend ## Build the deployment Docker image locally (needs Docker).
+	docker build -t scorepilot:local .
+
+.PHONY: image-run
+image-run: ## Run the local image on :8000 with a throwaway SQLite database.
+	docker run --rm -p $(PORT):8000 scorepilot:local
+
 .PHONY: doctor
 doctor: ## Print versions of the key tools.
 	@echo "uv:     $$(command -v uv >/dev/null 2>&1 && uv --version || echo 'NOT INSTALLED')"
