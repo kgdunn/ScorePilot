@@ -40,9 +40,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations against a live DB connection."""
-    connectable = create_engine(
-        get_settings().database_url, poolclass=pool.NullPool, future=True
-    )
+    connectable = create_engine(get_settings().database_url, poolclass=pool.NullPool, future=True)
     with connectable.connect() as connection:
         # batch mode keeps ALTER operations working on SQLite.
         context.configure(
