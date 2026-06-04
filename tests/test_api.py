@@ -189,6 +189,72 @@ def test_variable_inspector_unknown_column_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_fit_model_hangar_and_logbook(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+
+    created = client.post(
+        "/api/models",
+        json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 2, "name": "m1"},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    model_id = body["summary"]["id"]
+    assert body["summary"]["kind"] == "PCA"
+    assert body["diagnostics"]["x_loadings"]["data"]
+    assert len(body["diagnostics"]["ellipse_x"]) == 100
+
+    hangar = client.get("/api/models").json()
+    assert any(m["id"] == model_id for m in hangar)
+
+    detail = client.get(f"/api/models/{model_id}").json()
+    assert detail["summary"]["id"] == model_id
+    assert detail["diagnostics"] is not None
+    assert [s["id"] for s in detail["lineage"]] == [model_id]
+
+    variant = client.post(
+        "/api/models",
+        json={
+            "dataset_id": dataset_id,
+            "kind": "PCA",
+            "n_components": 2,
+            "parent_id": model_id,
+            "name": "m2",
+        },
+    )
+    assert variant.status_code == 201, variant.text
+    v = variant.json()
+    assert v["summary"]["parent_id"] == model_id
+    assert [s["id"] for s in v["lineage"]] == [model_id, v["summary"]["id"]]
+
+
+def test_fit_pls_model(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    response = client.post(
+        "/api/models",
+        json={
+            "dataset_id": dataset_id,
+            "kind": "PLS",
+            "n_components": 2,
+            "spec": {"x_columns": ["v0", "v1"], "y_columns": ["v2", "v3"]},
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["diagnostics"]["y_loadings"] is not None
+
+
+def test_fit_pls_without_y_is_422(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    response = client.post(
+        "/api/models",
+        json={"dataset_id": dataset_id, "kind": "PLS", "n_components": 2},
+    )
+    assert response.status_code == 422
+
+
+def test_get_unknown_model_is_404(client: TestClient) -> None:
+    assert client.get("/api/models/999").status_code == 404
+
+
 def test_spa_fallback_serves_index(client: TestClient) -> None:
     response = client.get("/some/client/route")
     assert response.status_code == 200

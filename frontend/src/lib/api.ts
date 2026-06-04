@@ -199,3 +199,76 @@ export async function fitPca(datasetId: string, nComponents: number): Promise<PC
     })
   );
 }
+
+// --- Models: Hangar and Logbook ---
+
+export interface ModelSummary {
+  id: number;
+  kind: string;
+  name: string | null;
+  n_components: number;
+  parent_id: number | null;
+  dataset_id: string | null;
+  created_at: string;
+}
+
+export interface LoadingsPayload {
+  component_names: string[];
+  variable_names: string[];
+  data: number[][];
+}
+
+export interface ModelDiagnostics {
+  kind: string;
+  n_components: number;
+  conf_level: number;
+  component_names: string[];
+  explained_variance: number[];
+  r2_per_component: number[];
+  r2_cumulative: number[];
+  scores: ScoresPayload;
+  x_loadings: LoadingsPayload;
+  y_loadings: LoadingsPayload | null;
+  hotellings_t2: number[];
+  spe: number[];
+  t2_limit: number;
+  spe_limit: number;
+  ellipse_x: number[];
+  ellipse_y: number[];
+  vip: Record<string, number>;
+}
+
+export interface ModelDetail {
+  summary: ModelSummary;
+  preprocessing: Record<string, unknown>;
+  excluded_samples: number[];
+  lineage: ModelSummary[];
+  diagnostics: ModelDiagnostics | null;
+}
+
+export interface FitModelRequest {
+  dataset_id: string;
+  kind: 'PCA' | 'PLS';
+  n_components: number;
+  name?: string | null;
+  parent_id?: number | null;
+  spec?: Record<string, unknown>;
+}
+
+export async function fitModel(request: FitModelRequest): Promise<ModelDetail> {
+  return asJson(
+    await fetch('/api/models', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request)
+    })
+  );
+}
+
+export async function listModels(): Promise<ModelSummary[]> {
+  return asJson(await fetch('/api/models'));
+}
+
+export async function getModel(id: number): Promise<ModelDetail> {
+  return asJson(await fetch(`/api/models/${id}`));
+}

@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import {
+    fitModel,
     getDataset,
     getGridAll,
     getQuality,
@@ -13,7 +15,7 @@
     type TransformKind
   } from '$lib/api';
   import { DataGrid, type CellValue, type GridColumn } from '$lib/grid';
-  import { emptyDraft, toggle, toggleNumber, type DraftSpec } from '$lib/spec';
+  import { emptyDraft, toApiSpec, toggle, toggleNumber, type DraftSpec } from '$lib/spec';
   import Ribbon from './Ribbon.svelte';
   import VariableInspector from './VariableInspector.svelte';
   import QualityPanel from './QualityPanel.svelte';
@@ -31,6 +33,11 @@
   let form = $state<'raw' | 'scaled'>('raw');
   let error = $state<string | null>(null);
   let loading = $state(true);
+
+  let fitKind = $state<'PCA' | 'PLS'>('PCA');
+  let fitComponents = $state(2);
+  let fitName = $state('');
+  let fitting = $state(false);
 
   async function loadAll() {
     loading = true;
@@ -174,6 +181,36 @@
     else transforms[column] = { kind: transform, c1: 0, c2: 1 };
     draft = { ...draft, transforms };
   }
+
+  function effectiveXColumns(): string[] {
+    if (draft.xColumns.length > 0) return draft.xColumns;
+    if (!detail) return [];
+    return detail.columns
+      .filter((c) => c.column_type === 'quantitative' && !draft.excludedColumns.includes(c.name))
+      .map((c) => c.name);
+  }
+
+  async function onFit() {
+    if (!detail) return;
+    fitting = true;
+    error = null;
+    try {
+      const spec = toApiSpec(draft) as Record<string, unknown>;
+      spec.x_columns = effectiveXColumns();
+      const result = await fitModel({
+        dataset_id: datasetId,
+        kind: fitKind,
+        n_components: fitComponents,
+        name: fitName || null,
+        spec
+      });
+      await goto(`/models/${result.summary.id}`);
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      fitting = false;
+    }
+  }
 </script>
 
 <div class="explorer">
@@ -245,6 +282,32 @@
     <section class="quality-area">
       <h3>Data quality</h3>
       <QualityPanel report={quality} />
+    </section>
+
+    <section class="build-area">
+      <h3>Build a model</h3>
+      <div class="build-row">
+        <label>
+          Type
+          <select bind:value={fitKind}>
+            <option value="PCA">PCA</option>
+            <option value="PLS">PLS</option>
+          </select>
+        </label>
+        <label>Components <input type="number" min="1" max="20" bind:value={fitComponents} /></label>
+        <label>Name <input type="text" placeholder="optional" bind:value={fitName} /></label>
+        <button onclick={onFit} disabled={fitting}>{fitting ? 'Fitting…' : 'Fit model'}</button>
+        <a class="hangar-link" href="/models">Hangar →</a>
+      </div>
+      <p class="hint">
+        X: {effectiveXColumns().length} variables{draft.xColumns.length === 0
+          ? ' (all quantitative)'
+          : ''}{fitKind === 'PLS' ? `, Y: ${draft.yColumns.length}` : ''}. Excluded rows:
+        {draft.excludedRows.length}.
+        {#if fitKind === 'PLS' && draft.yColumns.length === 0}
+          <span class="warn">Choose Y variables for PLS.</span>
+        {/if}
+      </p>
     </section>
   {/if}
 </div>
@@ -360,6 +423,52 @@
   }
   .explorer :global(.dg-cell.c-invalid) {
     background: #fdecea;
+    color: #b3261e;
+  }
+  .build-area {
+    border: 1px solid #e2e2e2;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+  }
+  .build-area h3 {
+    margin: 0 0 0.4rem;
+    font-size: 0.95rem;
+  }
+  .build-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .build-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+  }
+  .build-row input[type='number'] {
+    width: 4rem;
+    padding: 0.25rem;
+  }
+  .build-row input[type='text'] {
+    padding: 0.25rem;
+  }
+  .build-row button {
+    padding: 0.35rem 0.8rem;
+    border: 1px solid #2b6cb0;
+    background: #2b6cb0;
+    color: #fff;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .build-row button:disabled {
+    opacity: 0.5;
+  }
+  .hangar-link {
+    margin-left: auto;
+    font-size: 0.85rem;
+  }
+  .warn {
     color: #b3261e;
   }
 </style>

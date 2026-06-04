@@ -63,7 +63,7 @@
     {/if}
   </section>
 
-  <p class="foot"><a href="/playground">PCA scores playground →</a></p>
+  <p class="foot"><a href="/models">Hangar (models) →</a> &nbsp;·&nbsp; <a href="/playground">PCA scores playground →</a></p>
 </main>
 
 <style>

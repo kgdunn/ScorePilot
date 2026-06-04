@@ -35,6 +35,7 @@ class Model(Base):
     )
     kind: Mapped[str] = mapped_column(String(8))  # "PCA" or "PLS"
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    dataset_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     n_components: Mapped[int]
     preprocessing: Mapped[dict] = mapped_column(JSON, default=dict)
     excluded_samples: Mapped[list] = mapped_column(JSON, default=list)
