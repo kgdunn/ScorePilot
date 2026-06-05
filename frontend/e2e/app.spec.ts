@@ -61,6 +61,17 @@ test('assigning an X role and excluding a row update the status', async ({ page 
   await expect(page.getByTestId('ribbon-status')).toContainText('excluded rows: 1');
 });
 
+test('arrow keys move the focused cell and follow the selected column', async ({ page }) => {
+  await importDataset(page);
+  // Click a cell in the "yield" column (value 90 is unique to it).
+  await page.getByText('90', { exact: true }).click();
+  const inspector = page.getByTestId('inspector');
+  await expect(inspector).toContainText('yield');
+  // Arrow left moves the focused cell one column and the inspector follows.
+  await page.keyboard.press('ArrowLeft');
+  await expect(inspector).toContainText('conc');
+});
+
 test('fit a PCA model and see it in the Hangar with diagnostics', async ({ page }) => {
   await importDataset(page);
   await page.getByTestId('fit-model').click();
