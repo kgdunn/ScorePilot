@@ -7,9 +7,17 @@
   interface Props {
     datasetId: string;
     column: string;
+    form?: 'raw' | 'scaled';
+    appliedTransform?: TransformKind;
     onApplyTransform?: (column: string, transform: TransformKind) => void;
   }
-  let { datasetId, column, onApplyTransform }: Props = $props();
+  let {
+    datasetId,
+    column,
+    form = 'raw',
+    appliedTransform = 'none',
+    onApplyTransform
+  }: Props = $props();
 
   const TRANSFORMS: TransformKind[] = [
     'none',
@@ -30,18 +38,21 @@
   let histChart: ECharts | null = null;
   let seqChart: ECharts | null = null;
 
-  // Reset the preview when the selected column changes.
+  // When the selected column changes, preview the transform already applied to it
+  // in the draft spec (so e.g. a log-transformed variable shows transformed).
   $effect(() => {
-    if (column) transform = 'none';
+    void column;
+    transform = appliedTransform;
   });
 
   $effect(() => {
     const ds = datasetId;
     const col = column;
     const t = transform;
+    const f = form;
     void (async () => {
       try {
-        info = await getVariable(ds, col, t);
+        info = await getVariable(ds, col, t, f);
         error = null;
       } catch (e) {
         error = (e as Error).message;

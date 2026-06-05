@@ -13,8 +13,10 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from scorepilot.api.deps import DatasetStoreDep
 from scorepilot.core import (
+    ColumnType,
     PreprocessingSpec,
     TransformKind,
+    VariableTransform,
     apply_spec,
     apply_transform,
     histogram,
@@ -153,8 +155,14 @@ def inspect_variable(
     transform: Annotated[TransformKind, Query()] = TransformKind.NONE,
     c1: Annotated[float, Query()] = 0.0,
     c2: Annotated[float, Query()] = 1.0,
+    form: Annotated[str, Query(pattern="^(raw|scaled)$")] = "raw",
 ) -> VariableInspector:
-    """Return summary, histogram, and sequence for a variable (with optional preview)."""
+    """Return summary, histogram, and sequence for a variable (with optional preview).
+
+    When ``form=scaled`` the quantitative column is mean-centered and scaled to unit
+    variance (after any transform), so the distribution and sequence match the grid's
+    scaled view.
+    """
     dataset = _require(store, dataset_id)
     meta = dataset.column(column)
     if meta is None:
@@ -166,9 +174,20 @@ def inspect_variable(
     series = get_column(dataset.raw, column)
     suggested = suggest_transform(variable_summary(series, column_type=meta.column_type))
 
-    display = series
-    if transform is not TransformKind.NONE:
+    if form == "scaled" and meta.column_type is ColumnType.QUANTITATIVE:
+        # apply_spec applies the transform (if any) then mean-centers and scales,
+        # exactly as the scaled grid does, so the two views stay consistent.
+        transforms = (
+            {column: VariableTransform(kind=transform, c1=c1, c2=c2)}
+            if transform is not TransformKind.NONE
+            else {}
+        )
+        spec = PreprocessingSpec(x_columns=(column,), transforms=transforms)
+        display = get_column(apply_spec(dataset.raw, spec).X, column)
+    elif transform is not TransformKind.NONE:
         display = apply_transform(series, transform, c1=c1, c2=c2)
+    else:
+        display = series
     summary = variable_summary(display, column_type=meta.column_type)
     counts, edges = histogram(display)
 

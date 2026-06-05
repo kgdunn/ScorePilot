@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { getModel, type ModelDetail, type ModelDiagnostics } from '$lib/api';
+  import { showError } from '$lib/toast.svelte';
   import Chart from '$lib/components/Chart.svelte';
   import {
     barWithLimitOption,
@@ -12,7 +13,6 @@
 
   const id = $derived(Number($page.params.id));
   let detail = $state<ModelDetail | null>(null);
-  let error = $state<string | null>(null);
 
   $effect(() => {
     const mid = id;
@@ -20,9 +20,8 @@
     void (async () => {
       try {
         detail = await getModel(mid);
-        error = null;
       } catch (e) {
-        error = (e as Error).message;
+        showError((e as Error).message);
       }
     })();
   });
@@ -58,7 +57,6 @@
 
 <main>
   <p class="nav"><a href="/models">← Hangar</a></p>
-  {#if error}<p class="error">{error}</p>{/if}
 
   {#if detail}
     {@const s = detail.summary}
@@ -206,9 +204,6 @@
   .card h3 {
     margin: 0 0 0.3rem;
     font-size: 0.9rem;
-  }
-  .error {
-    color: #b3261e;
   }
   .hint {
     color: #777;

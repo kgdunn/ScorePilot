@@ -60,6 +60,9 @@ export function histogramOption(counts: number[], edges: number[]): EChartsOptio
     return `${Number(lo).toPrecision(3)}`.concat('–', `${Number(hi).toPrecision(3)}`);
   });
   return {
+    // No animation: the inspector reuses one chart instance across columns, and
+    // animating every column switch is distracting.
+    animation: false,
     grid: { left: 48, right: 16, top: 16, bottom: 60 },
     tooltip: { trigger: 'axis' },
     xAxis: {
@@ -206,6 +209,8 @@ export function vipOption(names: string[], values: number[]): EChartsOption {
 /** Build a sequence (order-of-acquisition) line plot. */
 export function sequenceOption(values: (number | null)[]): EChartsOption {
   return {
+    // No animation: switching columns should redraw instantly, not tween.
+    animation: false,
     grid: { left: 52, right: 16, top: 16, bottom: 40 },
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: values.map((_, i) => i + 1), name: 'order' },
