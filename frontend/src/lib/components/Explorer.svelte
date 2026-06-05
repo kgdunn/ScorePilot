@@ -36,6 +36,7 @@
 
   let fitKind = $state<'PCA' | 'PLS'>('PCA');
   let fitComponents = $state(2);
+  let fitAuto = $state(false);
   let fitName = $state('');
   let fitting = $state(false);
 
@@ -208,6 +209,7 @@
         dataset_id: datasetId,
         kind: fitKind,
         n_components: fitComponents,
+        auto_components: fitAuto,
         name: fitName || null,
         spec
       });
@@ -308,7 +310,13 @@
             <option value="PLS">PLS</option>
           </select>
         </label>
-        <label>Components <input type="number" min="1" max="20" bind:value={fitComponents} /></label>
+        <label>
+          Components
+          <input type="number" min="1" max="20" bind:value={fitComponents} disabled={fitAuto} />
+        </label>
+        <label class="auto" title="Choose the number of components by cross-validation">
+          <input type="checkbox" bind:checked={fitAuto} /> Auto (cross-validation)
+        </label>
         <label>Name <input type="text" placeholder="optional" bind:value={fitName} /></label>
         <button data-testid="fit-model" onclick={onFit} disabled={fitting}>
           {fitting ? 'Fitting…' : 'Fit model'}
@@ -320,6 +328,9 @@
           ? ' (all quantitative)'
           : ''}{fitKind === 'PLS' ? `, Y: ${draft.yColumns.length}` : ''}. Excluded rows:
         {draft.excludedRows.length}.
+        {#if fitAuto}
+          <span class="auto-note">Components chosen by cross-validation.</span>
+        {/if}
         {#if fitKind === 'PLS' && draft.yColumns.length === 0}
           <span class="warn">Choose Y variables for PLS.</span>
         {/if}
@@ -488,6 +499,15 @@
   }
   .warn {
     color: #b3261e;
+  }
+  .build-row label.auto {
+    gap: 0.3rem;
+  }
+  .build-row input:disabled {
+    opacity: 0.5;
+  }
+  .auto-note {
+    color: #2b6cb0;
   }
 
   /* On narrow screens, stack the inspector below the grid instead of beside it.

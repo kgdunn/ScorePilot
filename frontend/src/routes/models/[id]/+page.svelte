@@ -2,8 +2,10 @@
   import { page } from '$app/stores';
   import {
     getContributions,
+    getCrossValidation,
     getModel,
     type Contributions,
+    type CrossValidation,
     type ModelDetail,
     type ModelDiagnostics
   } from '$lib/api';
@@ -11,10 +13,12 @@
   import { formatDateTime } from '$lib/format';
   import Chart, { type ChartActivation } from '$lib/components/Chart.svelte';
   import ContributionModal from '$lib/components/ContributionModal.svelte';
+  import VariableRawModal from '$lib/components/VariableRawModal.svelte';
   import {
     barWithLimitOption,
     loadingsOption,
     oneComponentOption,
+    r2q2Option,
     scoresEllipseOption,
     vipOption,
     type OneAxisKind,
@@ -23,6 +27,7 @@
 
   const id = $derived(Number($page.params.id));
   let detail = $state<ModelDetail | null>(null);
+  let crossValidation = $state<CrossValidation | null>(null);
   // Chart type for the single-component (1-axis) scores/loadings plots.
   let oneAxisKind = $state<OneAxisKind>('bar');
   // Axis selection for the scores/loadings scatters: a component index, or 'seq'
@@ -38,6 +43,7 @@
     if (Number.isNaN(mid)) return;
     void (async () => {
       try {
+        crossValidation = null;
         detail = await getModel(mid);
         // Reset axis pickers to the canonical pair for the loaded model.
         const a = detail.diagnostics?.n_components ?? 0;
@@ -45,6 +51,15 @@
         scoresY = a >= 2 ? 1 : 'seq';
         loadingsX = 0;
         loadingsY = a >= 2 ? 1 : 'seq';
+        // Cross-validation is recomputed server-side; load it separately so a
+        // failure (e.g. too few rows) doesn't block the rest of the diagnostics.
+        if (detail.diagnostics) {
+          try {
+            crossValidation = await getCrossValidation(mid);
+          } catch {
+            crossValidation = null;
+          }
+        }
       } catch (e) {
         showError((e as Error).message);
       }
@@ -127,6 +142,8 @@
   // T2, or SPE point. Scores explain outlyingness via T2; SPE bars via SPE.
   let contribution = $state<Contributions | null>(null);
   let contributionMetric = $state<'t2' | 'spe'>('t2');
+  // Raw-data modal: opened by clicking a bar in the contribution plot.
+  let rawVariable = $state<string | null>(null);
 
   async function openContribution(observation: number, metric: 't2' | 'spe') {
     try {
@@ -267,6 +284,44 @@
             <h3>VIP</h3>
             <Chart option={vipOption(vipPair(d).names, vipPair(d).values)} height="260px" />
           </div>
+          {#if crossValidation}
+            {@const cv = crossValidation}
+            <div class="card wide">
+              <h3>R² and cross-validated R² (Q²) per component</h3>
+              <p class="hint">
+                R² is the in-sample fit of {cv.target}; Q² is its cross-validated
+                ({cv.n_splits}-fold) prediction. Cross-validation recommends
+                <strong>{cv.recommended}</strong>
+                component{cv.recommended === 1 ? '' : 's'}.
+              </p>
+              <Chart
+                option={r2q2Option(cv.component_numbers, cv.r2, cv.q2, cv.target, cv.recommended)}
+                height="280px"
+              />
+              <table class="r2-table">
+                <thead>
+                  <tr>
+                    <th>Component</th>
+                    <th>R²</th>
+                    <th>R² (cum.)</th>
+                    <th>Q²</th>
+                    <th>Q² (cum.)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each cv.component_numbers as comp, i (comp)}
+                    <tr class:recommended={comp === cv.recommended}>
+                      <td>{comp}</td>
+                      <td>{(cv.r2_per_component[i] * 100).toFixed(1)}%</td>
+                      <td>{(cv.r2[i] * 100).toFixed(1)}%</td>
+                      <td>{(cv.q2_per_component[i] * 100).toFixed(1)}%</td>
+                      <td>{(cv.q2[i] * 100).toFixed(1)}%</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
         </div>
       </section>
     {:else}
@@ -283,6 +338,15 @@
     contributions={contribution}
     metric={contributionMetric}
     onclose={() => (contribution = null)}
+    onVariableClick={(v) => (rawVariable = v)}
+  />
+{/if}
+
+{#if rawVariable && detail?.summary.dataset_id}
+  <VariableRawModal
+    datasetId={detail.summary.dataset_id}
+    column={rawVariable}
+    onclose={() => (rawVariable = null)}
   />
 {/if}
 
@@ -400,6 +464,30 @@
   }
   .hint {
     color: #777;
+  }
+  .r2-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    margin-top: 0.5rem;
+  }
+  .r2-table th,
+  .r2-table td {
+    text-align: right;
+    padding: 3px 8px;
+    border-bottom: 1px solid #eee;
+  }
+  .r2-table th:first-child,
+  .r2-table td:first-child {
+    text-align: left;
+  }
+  .r2-table th {
+    color: #666;
+    font-weight: 600;
+  }
+  .r2-table tr.recommended {
+    background: #fffaf0;
+    font-weight: 600;
   }
   /* On narrow screens, stack the diagnostic cards in a single column. */
   @media (max-width: 900px) {
