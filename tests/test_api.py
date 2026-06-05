@@ -348,7 +348,14 @@ def test_get_unknown_model_is_404(client: TestClient) -> None:
 
 def test_list_samples(client: TestClient) -> None:
     names = {s["name"] for s in client.get("/api/datasets/samples").json()}
-    assert {"ldpe", "food-consumption"} <= names
+    assert {
+        "ldpe",
+        "food-consumption",
+        "raw-material-properties",
+        "silicon-wafer-thickness",
+        "solvents",
+        "tablet-spectra",
+    } <= names
 
 
 def test_load_sample(client: TestClient) -> None:
@@ -358,6 +365,17 @@ def test_load_sample(client: TestClient) -> None:
     assert body["n_rows"] == 16
     # The unique "Country" column is auto-detected as the primary identifier.
     assert body["primary_id"] == "Country"
+
+
+def test_load_gzipped_spectra_sample(client: TestClient) -> None:
+    # tablet-spectra is bundled gzipped; loading it exercises the decompression
+    # path and confirms a wide spectral table imports cleanly.
+    response = client.post("/api/datasets/samples/tablet-spectra")
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["n_rows"] == 460
+    assert body["n_columns"] == 651
+    assert body["primary_id"] == "Tablet"
 
 
 def test_load_unknown_sample_is_404(client: TestClient) -> None:

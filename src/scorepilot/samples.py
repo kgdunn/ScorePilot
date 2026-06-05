@@ -6,6 +6,7 @@ so they behave exactly like a user-provided dataset.
 
 from __future__ import annotations
 
+import gzip
 from dataclasses import dataclass
 from importlib.resources import files
 
@@ -40,6 +41,34 @@ SAMPLES: tuple[Sample, ...] = (
         description="Consumption of 20 foods across European countries; includes missing values.",
         source_url="https://openmv.net/info/food-consumption",
     ),
+    Sample(
+        name="raw-material-properties",
+        filename="raw-material-properties.csv",
+        title="Raw material properties",
+        description="36 raw-material lots; 6 particle-size and density measurements.",
+        source_url="https://openmv.net/info/raw-material-properties",
+    ),
+    Sample(
+        name="silicon-wafer-thickness",
+        filename="silicon-wafer-thickness.csv",
+        title="Silicon wafer thickness",
+        description="Thickness at 9 gauge positions across 184 silicon wafers.",
+        source_url="https://openmv.net/info/silicon-wafer-thickness",
+    ),
+    Sample(
+        name="solvents",
+        filename="solvents.csv",
+        title="Solvent properties",
+        description="Physical properties of 103 common solvents; includes missing values.",
+        source_url="https://openmv.net/info/solvents",
+    ),
+    Sample(
+        name="tablet-spectra",
+        filename="tablet-spectra.csv.gz",
+        title="Tablet NIR spectra",
+        description="Near-infrared spectra of 460 tablets at 650 wavelengths; a spectral PCA demo.",
+        source_url="https://openmv.net/info/tablet-spectra",
+    ),
 )
 
 
@@ -49,7 +78,14 @@ def get_sample(name: str) -> Sample | None:
 
 
 def load_sample_frame(sample: Sample) -> pd.DataFrame:
-    """Read a bundled sample CSV into a DataFrame."""
+    """Read a bundled sample file into a DataFrame, decompressing ``.gz`` blobs.
+
+    Large samples (e.g. spectra) are stored gzipped to keep the wheel small.
+    """
     raw = (files("scorepilot").joinpath("sample_data", sample.filename)).read_bytes()
-    frame, _source, _sheets, _used = load_table(raw, sample.filename)
+    filename = sample.filename
+    if filename.endswith(".gz"):
+        raw = gzip.decompress(raw)
+        filename = filename[: -len(".gz")]
+    frame, _source, _sheets, _used = load_table(raw, filename)
     return frame
