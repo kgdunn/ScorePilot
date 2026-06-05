@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
+from scorepilot import __version__
 from scorepilot.api import datasets, exploration, models
 from scorepilot.config import Settings, get_settings
 from scorepilot.db import Base, make_engine, make_session_factory
@@ -55,7 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="ScorePilot",
-        version="0.1.0",
+        version=__version__,
         docs_url="/api/docs",
         redoc_url=None,
         openapi_url="/api/openapi.json",

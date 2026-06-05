@@ -9,6 +9,8 @@ preprocessing spec.
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -35,6 +37,84 @@ router = APIRouter(prefix="/datasets", tags=["datasets"])
 # Cap remote imports so a huge URL cannot exhaust memory.
 MAX_URL_BYTES = 5 * 1024 * 1024
 
+# Cap direct uploads too, so an unauthenticated POST cannot exhaust memory by
+# streaming an arbitrarily large body into the process.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+
+def _host_addresses(host: str) -> list[str]:
+    """Resolve ``host`` to the list of IP addresses it points at.
+
+    Factored out so it is easy to stub in tests and so URL guarding never
+    depends on live DNS in unit tests.
+    """
+    infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    return [str(info[4][0]) for info in infos]
+
+
+def _guard_public_url(url: str) -> None:
+    """Reject anything but http(s) to a genuinely public IP address.
+
+    This is the SSRF guard for the URL importer. Loopback, private, link-local
+    (including the cloud-metadata address ``169.254.169.254``), and other
+    reserved ranges are refused whether the URL names them directly or via DNS,
+    so the importer cannot be turned into a probe of internal services.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL must start with http:// or https://.",
+        )
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL has no host.",
+        )
+    try:
+        addresses = _host_addresses(host)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not resolve host: {host}",
+        ) from exc
+    for raw in addresses:
+        try:
+            # Strip any IPv6 scope id (e.g. "fe80::1%eth0") before parsing.
+            ip = ipaddress.ip_address(raw.split("%", 1)[0])
+        except ValueError as exc:
+            # Fail closed on anything we cannot classify.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="URL must point to a public host.",
+            ) from exc
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="URL must point to a public host.",
+            )
+
+
+class _PublicOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validate every redirect hop so a public URL cannot bounce to a private one."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN202
+        _guard_public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+# A single opener that validates the target of each redirect (the default
+# opener follows redirects blindly, which would defeat the guard above).
+_URL_OPENER = urllib.request.build_opener(_PublicOnlyRedirectHandler())
+
 
 def to_detail(dataset: Dataset) -> DatasetDetail:
     """Build the API detail model for a dataset."""
@@ -58,6 +138,22 @@ def to_detail(dataset: Dataset) -> DatasetDetail:
     )
 
 
+async def _read_capped(file: UploadFile) -> bytes:
+    """Read an uploaded file fully, but refuse bodies over ``MAX_UPLOAD_BYTES``."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"That file is larger than the {limit_mb} MB limit.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post("", response_model=DatasetDetail, status_code=status.HTTP_201_CREATED)
 async def upload_dataset(
     store: DatasetStoreDep,
@@ -65,7 +161,7 @@ async def upload_dataset(
     sheet: Annotated[str | None, Query(description="Excel sheet name")] = None,
 ) -> DatasetDetail:
     """Import a CSV or Excel file as a dataset."""
-    raw = await file.read()
+    raw = await _read_capped(file)
     filename = file.filename or "dataset.csv"
     try:
         frame, source, sheets, used = load_table(raw, filename, sheet)
@@ -88,19 +184,16 @@ async def upload_dataset(
 def _fetch_url(url: str) -> tuple[bytes, str]:
     """Fetch a CSV/Excel file from ``url`` (<= 5 MB), returning bytes and filename.
 
-    Only ``http``/``https`` URLs are allowed, and the download is capped so a huge
-    file cannot exhaust memory.
+    Only ``http``/``https`` URLs that resolve to a public IP are allowed (see
+    :func:`_guard_public_url`), redirects are re-validated, and the download is
+    capped so a huge file cannot exhaust memory.
     """
+    _guard_public_url(url)
     parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="URL must start with http:// or https://.",
-        )
     filename = Path(parsed.path).name or "dataset.csv"
     request = urllib.request.Request(url, headers={"User-Agent": "ScorePilot"})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with _URL_OPENER.open(request, timeout=30) as response:
             declared = response.headers.get("Content-Length")
             if declared is not None and declared.isdigit() and int(declared) > MAX_URL_BYTES:
                 raise HTTPException(

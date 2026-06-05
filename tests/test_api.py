@@ -403,11 +403,24 @@ class _FakeUrlResponse:
         return False
 
 
-def test_open_dataset_from_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the SSRF guard treat every host as a public IP, without live DNS."""
     monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda *_a, **_k: _FakeUrlResponse(_csv_bytes()),
+        "scorepilot.api.datasets._host_addresses",
+        lambda _host: ["93.184.216.34"],
     )
+
+
+def _stub_url_response(monkeypatch: pytest.MonkeyPatch, response: _FakeUrlResponse) -> None:
+    monkeypatch.setattr(
+        "scorepilot.api.datasets._URL_OPENER.open",
+        lambda *_a, **_k: response,
+    )
+
+
+def test_open_dataset_from_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_public_dns(monkeypatch)
+    _stub_url_response(monkeypatch, _FakeUrlResponse(_csv_bytes()))
     response = client.post("/api/datasets/from-url", json={"url": "https://example.com/data.csv"})
     assert response.status_code == 201, response.text
     body = response.json()
@@ -420,15 +433,39 @@ def test_open_dataset_from_url_rejects_non_http(client: TestClient) -> None:
     assert response.status_code == 400
 
 
+def test_open_dataset_from_url_rejects_private_host(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Even a syntactically valid public-looking URL must be refused if it resolves
+    # to a private/loopback/metadata address (SSRF guard).
+    monkeypatch.setattr(
+        "scorepilot.api.datasets._host_addresses",
+        lambda _host: ["169.254.169.254"],
+    )
+    response = client.post(
+        "/api/datasets/from-url", json={"url": "https://metadata.example/data.csv"}
+    )
+    assert response.status_code == 400
+    assert "public host" in response.json()["detail"]
+
+
 def test_open_dataset_from_url_rejects_oversized(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _stub_public_dns(monkeypatch)
     big = {"Content-Length": str(6 * 1024 * 1024)}
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda *_a, **_k: _FakeUrlResponse(b"x", headers=big),
-    )
+    _stub_url_response(monkeypatch, _FakeUrlResponse(b"x", headers=big))
     response = client.post("/api/datasets/from-url", json={"url": "https://example.com/big.csv"})
+    assert response.status_code == 413
+
+
+def test_upload_rejects_oversized(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("scorepilot.api.datasets.MAX_UPLOAD_BYTES", 1024)
+    payload = b"a,b,c\n" + b"1,2,3\n" * 1000
+    response = client.post(
+        "/api/datasets",
+        files={"file": ("big.csv", payload, "text/csv")},
+    )
     assert response.status_code == 413
 
 

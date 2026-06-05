@@ -1,3 +1,9 @@
 """ScorePilot: a web-based tool for PCA/PLS model analysis in chemometrics."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _version
+
+try:
+    __version__ = _version("scorepilot")
+except PackageNotFoundError:  # pragma: no cover - running from a source tree without install
+    __version__ = "0.0.0+unknown"
