@@ -213,4 +213,17 @@
   .hint {
     color: #777;
   }
+  /* On narrow screens, stack the diagnostic cards in a single column. */
+  @media (max-width: 900px) {
+    main {
+      margin: 1rem auto;
+      padding: 0 0.75rem;
+    }
+    .grid2 {
+      grid-template-columns: 1fr;
+    }
+    dl {
+      grid-template-columns: 6rem 1fr;
+    }
+  }
 </style>

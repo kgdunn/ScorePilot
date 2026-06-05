@@ -15,7 +15,13 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from scorepilot.api.deps import DatasetStoreDep
 from scorepilot.core import IdentifierRole
 from scorepilot.dataset_store import Dataset, load_table
-from scorepilot.schemas import ColumnMetaModel, ColumnUpdate, DatasetDetail
+from scorepilot.samples import SAMPLES, get_sample, load_sample_frame
+from scorepilot.schemas import (
+    ColumnMetaModel,
+    ColumnUpdate,
+    DatasetDetail,
+    SampleInfo,
+)
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -73,6 +79,28 @@ async def upload_dataset(
 def list_datasets(store: DatasetStoreDep) -> list[DatasetDetail]:
     """List all imported datasets."""
     return [to_detail(d) for d in store.list()]
+
+
+@router.get("/samples", response_model=list[SampleInfo])
+def list_samples() -> list[SampleInfo]:
+    """List the bundled demo datasets."""
+    return [
+        SampleInfo(name=s.name, title=s.title, description=s.description, source_url=s.source_url)
+        for s in SAMPLES
+    ]
+
+
+@router.post("/samples/{name}", response_model=DatasetDetail, status_code=status.HTTP_201_CREATED)
+def load_sample(name: str, store: DatasetStoreDep) -> DatasetDetail:
+    """Import a bundled demo dataset into the store."""
+    sample = get_sample(name)
+    if sample is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown sample: {name}",
+        )
+    dataset = store.add(sample.title, load_sample_frame(sample), source="sample")
+    return to_detail(dataset)
 
 
 @router.get("/{dataset_id}", response_model=DatasetDetail)

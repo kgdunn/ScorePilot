@@ -341,6 +341,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
     font-size: 0.78rem;
   }
   .chip {
@@ -472,5 +473,23 @@
   }
   .warn {
     color: #b3261e;
+  }
+
+  /* On narrow screens, stack the inspector below the grid instead of beside it. */
+  @media (max-width: 900px) {
+    .main {
+      grid-template-columns: 1fr;
+    }
+    .grid-area {
+      height: 52vh;
+      min-height: 300px;
+    }
+    .side {
+      height: auto;
+      max-height: 70vh;
+    }
+    .hangar-link {
+      margin-left: 0;
+    }
   }
 </style>

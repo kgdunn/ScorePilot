@@ -1,14 +1,22 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { listDatasets, uploadDataset, type DatasetDetail } from '$lib/api';
+  import {
+    listDatasets,
+    listSamples,
+    loadSample,
+    uploadDataset,
+    type DatasetDetail,
+    type SampleInfo
+  } from '$lib/api';
 
   let datasets = $state<DatasetDetail[]>([]);
+  let samples = $state<SampleInfo[]>([]);
   let busy = $state(false);
   let error = $state<string | null>(null);
 
   async function refresh() {
     try {
-      datasets = await listDatasets();
+      [datasets, samples] = await Promise.all([listDatasets(), listSamples()]);
     } catch (e) {
       error = (e as Error).message;
     }
@@ -17,6 +25,19 @@
   $effect(() => {
     void refresh();
   });
+
+  async function onLoadSample(name: string) {
+    busy = true;
+    error = null;
+    try {
+      const dataset = await loadSample(name);
+      await goto(`/datasets/${dataset.dataset_id}`);
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
 
   async function onFile(event: Event) {
     const input = event.target as HTMLInputElement;
@@ -52,6 +73,24 @@
     {#if busy}<span class="hint">Uploading…</span>{/if}
     {#if error}<p class="error">{error}</p>{/if}
   </section>
+
+  {#if samples.length}
+    <section class="panel">
+      <h2>Try a sample dataset</h2>
+      <ul class="samples">
+        {#each samples as s (s.name)}
+          <li>
+            <button data-testid={`sample-${s.name}`} onclick={() => onLoadSample(s.name)} disabled={busy}>
+              Load
+            </button>
+            <strong>{s.title}</strong>
+            <span class="meta">{s.description}</span>
+            <a class="src" href={s.source_url} target="_blank" rel="noreferrer">source ↗</a>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   <section class="panel">
     <h2>Datasets</h2>
@@ -125,5 +164,32 @@
   .foot {
     margin-top: 1.5rem;
     font-size: 0.85rem;
+  }
+  ul.samples {
+    list-style: none;
+    padding: 0;
+  }
+  ul.samples li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  ul.samples button {
+    padding: 0.25rem 0.7rem;
+    border: 1px solid #2b6cb0;
+    background: #2b6cb0;
+    color: #fff;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  ul.samples button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .src {
+    font-size: 0.8rem;
   }
 </style>
