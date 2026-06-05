@@ -9,6 +9,31 @@ export function initChart(element: HTMLElement): echarts.ECharts {
   return echarts.init(element, undefined, { renderer: 'canvas' });
 }
 
+/** Split a long label across (at most) two lines at a natural break near the
+ * middle, so axis labels can stay horizontal. We never rotate axis labels. */
+export function wrapAxisLabel(value: string): string {
+  const s = String(value ?? '');
+  if (s.length <= 8) return s;
+  const mid = Math.floor(s.length / 2);
+  const separators = new Set([' ', '–', '-', '_', '/', ',']);
+  let best = -1;
+  for (let i = 1; i < s.length - 1; i++) {
+    if (separators.has(s[i]) && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+  }
+  if (best > 0) return `${s.slice(0, best + 1)}\n${s.slice(best + 1)}`;
+  return `${s.slice(0, mid)}\n${s.slice(mid)}`;
+}
+
+/** Shared axis-label config for category axes: always horizontal, auto-thinned,
+ * and wrapped to two lines when long. */
+const categoryAxisLabel = {
+  rotate: 0,
+  hideOverlap: true,
+  fontSize: 9,
+  lineHeight: 11,
+  formatter: wrapAxisLabel
+} as const;
+
 /** Build a 2D scores scatter (one component on each axis), with origin guides. */
 export function scoresScatterOption(
   points: ScorePoint[],
@@ -63,12 +88,12 @@ export function histogramOption(counts: number[], edges: number[]): EChartsOptio
     // No animation: the inspector reuses one chart instance across columns, and
     // animating every column switch is distracting.
     animation: false,
-    grid: { left: 48, right: 16, top: 16, bottom: 60 },
+    grid: { left: 48, right: 16, top: 16, bottom: 52 },
     tooltip: { trigger: 'axis' },
     xAxis: {
       type: 'category',
       data: categories,
-      axisLabel: { rotate: 45, fontSize: 10, hideOverlap: true }
+      axisLabel: categoryAxisLabel
     },
     yAxis: { type: 'value', name: 'count' },
     series: [{ type: 'bar', data: counts, itemStyle: { color: '#3aa757' }, barWidth: '99%' }]
@@ -163,9 +188,9 @@ export function barWithLimitOption(
   yName: string
 ): EChartsOption {
   return {
-    grid: { left: 56, right: 16, top: 24, bottom: 56 },
+    grid: { left: 56, right: 16, top: 24, bottom: 48 },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: names, axisLabel: { rotate: 45, fontSize: 9, hideOverlap: true } },
+    xAxis: { type: 'category', data: names, axisLabel: categoryAxisLabel },
     yAxis: { type: 'value', name: yName },
     series: [
       {
@@ -186,9 +211,9 @@ export function barWithLimitOption(
 /** VIP bar chart with a reference line at 1.0. */
 export function vipOption(names: string[], values: number[]): EChartsOption {
   return {
-    grid: { left: 56, right: 16, top: 24, bottom: 70 },
+    grid: { left: 56, right: 16, top: 24, bottom: 52 },
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: names, axisLabel: { rotate: 45, fontSize: 9, hideOverlap: true } },
+    xAxis: { type: 'category', data: names, axisLabel: categoryAxisLabel },
     yAxis: { type: 'value', name: 'VIP' },
     series: [
       {
@@ -218,6 +243,52 @@ export function sequenceOption(values: (number | null)[]): EChartsOption {
     yAxis: { type: 'value', scale: true },
     series: [
       { type: 'line', data: values, showSymbol: false, lineStyle: { color: '#2b6cb0' } }
+    ]
+  };
+}
+
+export type OneAxisKind = 'bar' | 'line' | 'scatter';
+
+/** A single-component plot: one value per observation/variable along one axis.
+ * Used for scores and loadings when a model has only one component, where a 2D
+ * scatter would collapse onto a line. The chart type is caller-selectable. */
+export function oneComponentOption(
+  names: string[],
+  values: number[],
+  yName: string,
+  kind: OneAxisKind = 'bar',
+  xName = ''
+): EChartsOption {
+  const color = '#2b6cb0';
+  const series =
+    kind === 'bar'
+      ? { type: 'bar' as const, data: values, itemStyle: { color } }
+      : kind === 'line'
+        ? { type: 'line' as const, data: values, symbolSize: 7, lineStyle: { color }, itemStyle: { color } }
+        : { type: 'scatter' as const, data: values, symbolSize: 9, itemStyle: { color } };
+  return {
+    animation: false,
+    grid: { left: 60, right: 24, top: 24, bottom: 56 },
+    tooltip: { trigger: kind === 'scatter' ? 'item' : 'axis' },
+    xAxis: {
+      type: 'category',
+      data: names,
+      name: xName,
+      nameLocation: 'middle',
+      nameGap: 38,
+      axisLabel: categoryAxisLabel
+    },
+    yAxis: { type: 'value', name: yName, scale: true },
+    series: [
+      {
+        ...series,
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { type: 'dashed', color: '#bbb' },
+          data: [{ yAxis: 0 }]
+        }
+      }
     ]
   };
 }

@@ -6,13 +6,17 @@
   import {
     barWithLimitOption,
     loadingsOption,
+    oneComponentOption,
     scoresEllipseOption,
     vipOption,
+    type OneAxisKind,
     type ScorePoint
   } from '$lib/echarts';
 
   const id = $derived(Number($page.params.id));
   let detail = $state<ModelDetail | null>(null);
+  // Chart type for the single-component (1-axis) scores/loadings plots.
+  let oneAxisKind = $state<OneAxisKind>('bar');
 
   $effect(() => {
     const mid = id;
@@ -43,6 +47,14 @@
   function vipPair(d: ModelDiagnostics): { names: string[]; values: number[] } {
     const names = Object.keys(d.vip);
     return { names, values: names.map((n) => d.vip[n]) };
+  }
+
+  function scoreValues(d: ModelDiagnostics): number[] {
+    return d.scores.data.map((r) => r[0]);
+  }
+
+  function loadingValues(d: ModelDiagnostics): number[] {
+    return d.x_loadings.data.map((r) => r[0]);
   }
 
   function preprocessingSummary(p: Record<string, unknown>): string {
@@ -91,15 +103,37 @@
 
     {#if detail.diagnostics}
       {@const d = detail.diagnostics}
+      {@const oneComponent = d.n_components < 2}
       <section class="diagnostics" data-testid="diagnostics">
+        {#if oneComponent}
+          <div class="chart-kind">
+            <label>
+              Chart type
+              <select bind:value={oneAxisKind}>
+                <option value="bar">Bar</option>
+                <option value="line">Line</option>
+                <option value="scatter">Scatter</option>
+              </select>
+            </label>
+            <span class="hint">This model has one component, so scores and loadings are shown on a single axis.</span>
+          </div>
+        {/if}
         <div class="grid2">
           <div class="card">
             <h3>Scores (with T² limit)</h3>
-            <Chart option={scoresEllipseOption(scorePoints(d), d.ellipse_x, d.ellipse_y, axis(d, 0), axis(d, 1))} />
+            {#if oneComponent}
+              <Chart option={oneComponentOption(d.scores.observation_names, scoreValues(d), axis(d, 0), oneAxisKind, 'observation')} />
+            {:else}
+              <Chart option={scoresEllipseOption(scorePoints(d), d.ellipse_x, d.ellipse_y, axis(d, 0), axis(d, 1))} />
+            {/if}
           </div>
           <div class="card">
             <h3>Loadings</h3>
-            <Chart option={loadingsOption(loadingPoints(d), axis(d, 0), axis(d, 1))} />
+            {#if oneComponent}
+              <Chart option={oneComponentOption(d.x_loadings.variable_names, loadingValues(d), axis(d, 0), oneAxisKind, 'variable')} />
+            {:else}
+              <Chart option={loadingsOption(loadingPoints(d), axis(d, 0), axis(d, 1))} />
+            {/if}
           </div>
           <div class="card">
             <h3>Hotelling's T²</h3>
@@ -191,6 +225,22 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 1rem;
+  }
+  .chart-kind {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    font-size: 0.85rem;
+  }
+  .chart-kind label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .chart-kind select {
+    padding: 0.2rem;
   }
   .card {
     background: #fff;

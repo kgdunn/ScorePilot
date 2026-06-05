@@ -9,6 +9,7 @@
     column: string;
     form?: 'raw' | 'scaled';
     appliedTransform?: TransformKind;
+    excludedRows?: number[];
     onApplyTransform?: (column: string, transform: TransformKind) => void;
   }
   let {
@@ -16,6 +17,7 @@
     column,
     form = 'raw',
     appliedTransform = 'none',
+    excludedRows = [],
     onApplyTransform
   }: Props = $props();
 
@@ -48,11 +50,14 @@
   $effect(() => {
     const ds = datasetId;
     const col = column;
-    const t = transform;
     const f = form;
+    const excluded = excludedRows;
+    // Raw view shows the original data; the transform is part of the scaled
+    // (preprocessed) view, so the table and plots stay consistent per mode.
+    const t = f === 'scaled' ? transform : 'none';
     void (async () => {
       try {
-        info = await getVariable(ds, col, t, f);
+        info = await getVariable(ds, col, t, f, excluded);
         error = null;
       } catch (e) {
         error = (e as Error).message;
@@ -70,6 +75,19 @@
       histChart.clear();
     }
     seqChart.setOption(sequenceOption(info.sequence), true);
+  });
+
+  // Keep the canvases sized to their container so the plots fit the available
+  // width (e.g. a narrow portrait viewport) without horizontal scrolling.
+  $effect(() => {
+    if (!histEl || !seqEl) return;
+    const observer = new ResizeObserver(() => {
+      histChart?.resize();
+      seqChart?.resize();
+    });
+    observer.observe(histEl);
+    observer.observe(seqEl);
+    return () => observer.disconnect();
   });
 
   onDestroy(() => {

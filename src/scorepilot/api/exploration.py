@@ -6,6 +6,7 @@ inspector is a non-destructive *preview*; it never changes the stored data.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 import pandas as pd
@@ -104,10 +105,19 @@ def get_grid(
     col_offset: Annotated[int, Query(ge=0)] = 0,
     col_limit: Annotated[int, Query(ge=1, le=200)] = 50,
     form: Annotated[str, Query(pattern="^(raw|scaled)$")] = "raw",
+    transforms: Annotated[
+        str | None,
+        Query(description='JSON map of column -> {"kind", "c1", "c2"} applied in scaled view'),
+    ] = None,
 ) -> GridWindow:
-    """Return a windowed block of cells for the grid, raw or autoscaled."""
+    """Return a windowed block of cells for the grid, raw or autoscaled.
+
+    In the scaled view, the draft spec's per-variable transforms (passed as a JSON
+    ``transforms`` map) are applied before scaling, so the table matches the scaled
+    plots in the inspector.
+    """
     dataset = _require(store, dataset_id)
-    display = _display_frame(dataset, form)
+    display = _display_frame(dataset, form, _parse_transforms(transforms))
 
     all_columns = [str(c) for c in display.columns]
     column_names = all_columns[col_offset : col_offset + col_limit]
@@ -126,14 +136,47 @@ def get_grid(
     )
 
 
-def _display_frame(dataset: Dataset, form: str) -> pd.DataFrame:
+def _parse_transforms(raw: str | None) -> dict[str, VariableTransform]:
+    """Parse the ``transforms`` query (a JSON column -> transform map)."""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid transforms parameter: expected a JSON object.",
+        ) from exc
+    if not isinstance(data, dict):
+        return {}
+    result: dict[str, VariableTransform] = {}
+    for name, spec in data.items():
+        if not isinstance(spec, dict):
+            continue
+        try:
+            kind = TransformKind(spec.get("kind", "none"))
+        except ValueError:
+            continue
+        result[str(name)] = VariableTransform(
+            kind=kind,
+            c1=float(spec.get("c1", 0.0)),
+            c2=float(spec.get("c2", 1.0)),
+        )
+    return result
+
+
+def _display_frame(
+    dataset: Dataset, form: str, transforms: dict[str, VariableTransform] | None = None
+) -> pd.DataFrame:
     if form != "scaled":
         return dataset.raw
     quantitative = dataset.quantitative_columns()
     if not quantitative:
         return dataset.raw
-    # Scale using full-column statistics so the view is stable across scrolling.
-    scaled = apply_spec(dataset.raw, PreprocessingSpec(x_columns=tuple(quantitative))).X
+    # Apply any per-variable transforms, then scale on full-column statistics so the
+    # view is stable across scrolling and consistent with the inspector's plots.
+    spec = PreprocessingSpec(x_columns=tuple(quantitative), transforms=transforms or {})
+    scaled = apply_spec(dataset.raw, spec).X
     display = dataset.raw.copy()
     for name in quantitative:
         display[name] = scaled[name]
@@ -156,12 +199,14 @@ def inspect_variable(
     c1: Annotated[float, Query()] = 0.0,
     c2: Annotated[float, Query()] = 1.0,
     form: Annotated[str, Query(pattern="^(raw|scaled)$")] = "raw",
+    excluded_rows: Annotated[list[int] | None, Query()] = None,
 ) -> VariableInspector:
     """Return summary, histogram, and sequence for a variable (with optional preview).
 
     When ``form=scaled`` the quantitative column is mean-centered and scaled to unit
     variance (after any transform), so the distribution and sequence match the grid's
-    scaled view.
+    scaled view. ``excluded_rows`` are dropped first, so excluding an outlier updates
+    the plots (and the scaling statistics in the scaled view).
     """
     dataset = _require(store, dataset_id)
     meta = dataset.column(column)
@@ -171,18 +216,22 @@ def inspect_variable(
             detail=f"Unknown column: {column}",
         )
 
-    series = get_column(dataset.raw, column)
+    excluded = {i for i in (excluded_rows or []) if 0 <= i < len(dataset.raw)}
+    active = [i for i in range(len(dataset.raw)) if i not in excluded]
+    series = get_column(dataset.raw, column).iloc[active]
     suggested = suggest_transform(variable_summary(series, column_type=meta.column_type))
 
     if form == "scaled" and meta.column_type is ColumnType.QUANTITATIVE:
-        # apply_spec applies the transform (if any) then mean-centers and scales,
-        # exactly as the scaled grid does, so the two views stay consistent.
+        # apply_spec drops excluded rows, applies the transform (if any), then
+        # mean-centers and scales, exactly as the scaled grid does.
         transforms = (
             {column: VariableTransform(kind=transform, c1=c1, c2=c2)}
             if transform is not TransformKind.NONE
             else {}
         )
-        spec = PreprocessingSpec(x_columns=(column,), transforms=transforms)
+        spec = PreprocessingSpec(
+            x_columns=(column,), transforms=transforms, excluded_rows=tuple(sorted(excluded))
+        )
         display = get_column(apply_spec(dataset.raw, spec).X, column)
     elif transform is not TransformKind.NONE:
         display = apply_transform(series, transform, c1=c1, c2=c2)
