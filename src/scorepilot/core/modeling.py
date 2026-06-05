@@ -83,6 +83,7 @@ def fit_model(
     n_components: int,
     *,
     conf_level: float = 0.95,
+    observation_names: list[str] | None = None,
 ) -> ModelDiagnostics:
     """Fit a model of ``kind`` ("PCA" or "PLS") to already-preprocessed blocks.
 
@@ -90,12 +91,23 @@ def fit_model(
     ``apply_spec`` - transformed, centered, and scaled - so the estimators are not
     asked to scale again.
 
+    ``observation_names`` labels the rows in plots (the scores scatter, T2/SPE
+    bars). When omitted the block's index is used; callers with a primary
+    identifier should pass its values so points carry meaningful labels rather
+    than positional integers.
+
     Raises
     ------
     ValueError
-        For an unknown ``kind``, a PLS fit without Y columns, or an out-of-range
-        ``n_components``.
+        For an unknown ``kind``, a PLS fit without Y columns, an out-of-range
+        ``n_components``, or an ``observation_names`` length mismatch.
     """
+    if observation_names is not None and len(observation_names) != x_block.shape[0]:
+        msg = (
+            f"observation_names has {len(observation_names)} entries but the X block "
+            f"has {x_block.shape[0]} rows"
+        )
+        raise ValueError(msg)
     model = _fit_estimator(x_block, y_block, kind, n_components)
     if kind == "PLS":
         x_loadings = cast("pd.DataFrame", model.x_loadings_)
@@ -134,7 +146,11 @@ def fit_model(
         n_components=n_components,
         conf_level=conf_level,
         component_names=component_names,
-        observation_names=[str(i) for i in x_block.index.astype(str)],
+        observation_names=(
+            observation_names
+            if observation_names is not None
+            else [str(i) for i in x_block.index.astype(str)]
+        ),
         x_variable_names=[str(c) for c in x_block.columns.astype(str)],
         y_variable_names=[str(c) for c in (y_block.columns if y_block is not None else [])],
         scores=scores,
@@ -170,12 +186,16 @@ def observation_contributions(
     kind: ModelKind,
     n_components: int,
     observation: int,
+    *,
+    observation_name: str | None = None,
 ) -> Contributions:
     """Per-variable contributions of one observation to Hotelling's T2 and SPE.
 
     The T2 contributions sum to that observation's T2; the SPE contributions are
     its signed per-variable residuals (their squares sum to its SPE). ``x_block``
     (and ``y_block`` for PLS) must be the preprocessed blocks from ``apply_spec``.
+    ``observation_name`` labels the observation (e.g. its primary identifier);
+    when omitted the block's index value is used.
 
     Raises
     ------
@@ -208,7 +228,9 @@ def observation_contributions(
 
     return Contributions(
         observation=observation,
-        observation_name=str(x_block.index[observation]),
+        observation_name=(
+            observation_name if observation_name is not None else str(x_block.index[observation])
+        ),
         variable_names=[str(c) for c in x_block.columns.astype(str)],
         t2=[float(v) for v in t2_contrib],
         spe=[float(v) for v in spe_contrib],

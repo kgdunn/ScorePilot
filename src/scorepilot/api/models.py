@@ -9,16 +9,20 @@ from fastapi import APIRouter, HTTPException, status
 
 from scorepilot.api.deps import DatasetStoreDep, RepositoryDep
 from scorepilot.core import (
+    AppliedWorkset,
     ModelDiagnostics,
     PreprocessingSpec,
     apply_spec,
+    cross_validate,
     fit_model,
     observation_contributions,
 )
+from scorepilot.core._pandas import column as get_column
 from scorepilot.dataset_store import Dataset
 from scorepilot.db import Model
 from scorepilot.schemas import (
     ContributionsModel,
+    CrossValidationModel,
     FitModelRequest,
     FitPCARequest,
     LoadingsPayload,
@@ -30,6 +34,10 @@ from scorepilot.schemas import (
 )
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+# Ceiling on components evaluated when auto-fitting by cross-validation; matches
+# the components input's upper bound in the build form.
+_AUTO_MAX_COMPONENTS = 20
 
 
 # --- helpers ----------------------------------------------------------------
@@ -52,11 +60,47 @@ def _default_spec(dataset: Dataset, spec: PreprocessingSpec | None) -> Preproces
     return PreprocessingSpec(x_columns=tuple(dataset.quantitative_columns()))
 
 
+def _format_identifier(value: object) -> str:
+    """Render a primary-identifier value as a plot label (compact floats)."""
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
+def _observation_names(dataset: Dataset, applied: AppliedWorkset) -> list[str]:
+    """Labels for the model's rows: the dataset's primary identifier where set.
+
+    ``apply_spec`` drops excluded rows but keeps the surviving rows' original
+    positions as the X-block index, so the primary-identifier column is read at
+    exactly those positions to label scores and T2/SPE bars.
+    """
+    positions = [int(i) for i in applied.X.index]
+    if dataset.primary_id is not None:
+        ids = get_column(dataset.raw, dataset.primary_id)
+        return [_format_identifier(ids.iloc[p]) for p in positions]
+    return [str(p) for p in positions]
+
+
 def _run_fit(
-    dataset: Dataset, spec: PreprocessingSpec, kind: str, n_components: int, conf_level: float
+    dataset: Dataset,
+    spec: PreprocessingSpec,
+    kind: str,
+    n_components: int,
+    conf_level: float,
+    *,
+    auto_components: bool = False,
 ) -> ModelDiagnostics:
     applied = apply_spec(dataset.raw, spec)
-    return fit_model(applied.X, applied.Y, kind, n_components, conf_level=conf_level)
+    names = _observation_names(dataset, applied)
+    if auto_components:
+        # Let cross-validation pick the count freely (up to the UI's ceiling),
+        # rather than capping at whatever number the user happened to type.
+        n_components = cross_validate(
+            applied.X, applied.Y, kind, max_components=_AUTO_MAX_COMPONENTS
+        ).recommended
+    return fit_model(
+        applied.X, applied.Y, kind, n_components, conf_level=conf_level, observation_names=names
+    )
 
 
 def _summary(model: Model) -> ModelSummary:
@@ -135,7 +179,14 @@ def fit_model_endpoint(
 
     spec = _default_spec(dataset, request.spec.to_core() if request.spec else None)
     try:
-        diag = _run_fit(dataset, spec, request.kind, request.n_components, request.conf_level)
+        diag = _run_fit(
+            dataset,
+            spec,
+            request.kind,
+            request.n_components,
+            request.conf_level,
+            auto_components=request.auto_components,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
@@ -222,9 +273,16 @@ def model_contributions(
 
     spec = PreprocessingSpec.from_dict(model.preprocessing)
     applied = apply_spec(dataset.raw, spec)
+    names = _observation_names(dataset, applied)
+    name = names[observation] if 0 <= observation < len(names) else None
     try:
         contrib = observation_contributions(
-            applied.X, applied.Y, model.kind, model.n_components, observation
+            applied.X,
+            applied.Y,
+            model.kind,
+            model.n_components,
+            observation,
+            observation_name=name,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -237,6 +295,50 @@ def model_contributions(
         variable_names=contrib.variable_names,
         t2=contrib.t2,
         spe=contrib.spe,
+    )
+
+
+@router.get("/{model_id}/cross-validation", response_model=CrossValidationModel)
+def model_cross_validation(
+    model_id: int, store: DatasetStoreDep, repository: RepositoryDep
+) -> CrossValidationModel:
+    """Per-component calibration R2 and cross-validated Q2 for a fitted model.
+
+    Backs the R2/Q2 plot and table: R2 is the in-sample fit after each component,
+    Q2 the cross-validated (out-of-sample) prediction, with the Q2-optimal
+    component count flagged.
+    """
+    model = repository.get(model_id)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown model id: {model_id}"
+        )
+    dataset = store.get(model.dataset_id) if model.dataset_id else None
+    if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source dataset is no longer loaded; cannot cross-validate.",
+        )
+
+    spec = PreprocessingSpec.from_dict(model.preprocessing)
+    applied = apply_spec(dataset.raw, spec)
+    try:
+        cv = cross_validate(applied.X, applied.Y, model.kind, max_components=model.n_components)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    return CrossValidationModel(
+        kind=cv.kind,
+        target=cv.target,
+        n_splits=cv.n_splits,
+        component_numbers=cv.component_numbers,
+        r2=cv.r2,
+        q2=cv.q2,
+        r2_per_component=cv.r2_per_component,
+        q2_per_component=cv.q2_per_component,
+        recommended=cv.recommended,
     )
 
 
