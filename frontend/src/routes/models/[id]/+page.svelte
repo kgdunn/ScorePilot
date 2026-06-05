@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { getModel, type ModelDetail, type ModelDiagnostics } from '$lib/api';
   import { showError } from '$lib/toast.svelte';
+  import { formatDateTime } from '$lib/format';
   import Chart from '$lib/components/Chart.svelte';
   import {
     barWithLimitOption,
@@ -10,13 +11,20 @@
     scoresEllipseOption,
     vipOption,
     type OneAxisKind,
-    type ScorePoint
+    type ScatterPoint
   } from '$lib/echarts';
 
   const id = $derived(Number($page.params.id));
   let detail = $state<ModelDetail | null>(null);
   // Chart type for the single-component (1-axis) scores/loadings plots.
   let oneAxisKind = $state<OneAxisKind>('bar');
+  // Axis selection for the scores/loadings scatters: a component index, or 'seq'
+  // for the data's sequence (observation/variable) order.
+  type AxisSel = number | 'seq';
+  let scoresX = $state<AxisSel>(0);
+  let scoresY = $state<AxisSel>(1);
+  let loadingsX = $state<AxisSel>(0);
+  let loadingsY = $state<AxisSel>(1);
 
   $effect(() => {
     const mid = id;
@@ -24,6 +32,12 @@
     void (async () => {
       try {
         detail = await getModel(mid);
+        // Reset axis pickers to the canonical pair for the loaded model.
+        const a = detail.diagnostics?.n_components ?? 0;
+        scoresX = 0;
+        scoresY = a >= 2 ? 1 : 'seq';
+        loadingsX = 0;
+        loadingsY = a >= 2 ? 1 : 'seq';
       } catch (e) {
         showError((e as Error).message);
       }
@@ -32,16 +46,48 @@
 
   function axis(d: ModelDiagnostics, i: number): string {
     const name = d.component_names[i] ?? `PC${i + 1}`;
-    const pct = d.r2_per_component[i] != null ? ` (${(d.r2_per_component[i] * 100).toFixed(1)}%)` : '';
+    // Variance explained is always shown in square brackets, consistently.
+    const pct = d.r2_per_component[i] != null ? ` [${(d.r2_per_component[i] * 100).toFixed(1)}%]` : '';
     return `${name}${pct}`;
   }
 
-  function scorePoints(d: ModelDiagnostics): ScorePoint[] {
-    return d.scores.data.map((r, i) => [r[0], r[1] ?? 0, d.scores.observation_names[i]]);
+  function axisName(d: ModelDiagnostics, sel: AxisSel): string {
+    return sel === 'seq' ? 'Sequence order' : axis(d, sel);
   }
 
-  function loadingPoints(d: ModelDiagnostics): ScorePoint[] {
-    return d.x_loadings.data.map((r, i) => [r[0], r[1] ?? 0, d.x_loadings.variable_names[i]]);
+  /** Options for an axis dropdown: "Seq" first, then each component. */
+  function axisOptions(d: ModelDiagnostics): { value: AxisSel; label: string }[] {
+    return [
+      { value: 'seq', label: 'Seq' },
+      ...d.component_names.map((_, c) => ({ value: c as AxisSel, label: axis(d, c) }))
+    ];
+  }
+
+  function scoreAt(d: ModelDiagnostics, sel: AxisSel, row: number): number {
+    return sel === 'seq' ? row + 1 : (d.scores.data[row][sel] ?? 0);
+  }
+
+  function loadAt(d: ModelDiagnostics, sel: AxisSel, row: number): number {
+    return sel === 'seq' ? row + 1 : (d.x_loadings.data[row][sel] ?? 0);
+  }
+
+  // Scores carry SPE and Hotelling's T2 per point so the hover can show them.
+  function scorePoints(d: ModelDiagnostics): ScatterPoint[] {
+    return d.scores.data.map((_, i) => [
+      scoreAt(d, scoresX, i),
+      scoreAt(d, scoresY, i),
+      d.scores.observation_names[i],
+      d.spe[i],
+      d.hotellings_t2[i]
+    ]);
+  }
+
+  function loadingPoints(d: ModelDiagnostics): ScatterPoint[] {
+    return d.x_loadings.data.map((_, i) => [
+      loadAt(d, loadingsX, i),
+      loadAt(d, loadingsY, i),
+      d.x_loadings.variable_names[i]
+    ]);
   }
 
   function vipPair(d: ModelDiagnostics): { names: string[]; values: number[] } {
@@ -65,7 +111,13 @@
     const exc = (p.excluded_columns as string[] | undefined)?.length ?? 0;
     return `X: ${x}, Y: ${y}, transforms: ${tr}, excluded rows: ${exr}, excluded cols: ${exc}, scaling: ${p.default_scaling ?? '—'}`;
   }
+
+  const pageTitle = $derived(
+    detail ? `${detail.summary.name ?? `Model ${detail.summary.id}`} · ScorePilot` : 'ScorePilot'
+  );
 </script>
+
+<svelte:head><title>{pageTitle}</title></svelte:head>
 
 <main>
   <p class="nav"><a href="/models">← Hangar</a></p>
@@ -81,8 +133,7 @@
       <h2>Logbook</h2>
       <dl>
         <dt>Components</dt><dd>{s.n_components}</dd>
-        <dt>Dataset</dt><dd>{s.dataset_id ?? '—'}</dd>
-        <dt>Created</dt><dd>{new Date(s.created_at).toLocaleString()}</dd>
+        <dt>Created</dt><dd>{formatDateTime(s.created_at)}</dd>
         <dt>Preprocessing</dt><dd>{preprocessingSummary(detail.preprocessing)}</dd>
         <dt>Lineage</dt>
         <dd>
@@ -124,7 +175,28 @@
             {#if oneComponent}
               <Chart option={oneComponentOption(d.scores.observation_names, scoreValues(d), axis(d, 0), oneAxisKind, 'observation')} />
             {:else}
-              <Chart option={scoresEllipseOption(scorePoints(d), d.ellipse_x, d.ellipse_y, axis(d, 0), axis(d, 1))} />
+              {@const canonical = scoresX === 0 && scoresY === 1}
+              <div class="axis-pick">
+                <label>X
+                  <select bind:value={scoresX}>
+                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+                  </select>
+                </label>
+                <label>Y
+                  <select bind:value={scoresY}>
+                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+                  </select>
+                </label>
+              </div>
+              <Chart
+                option={scoresEllipseOption(
+                  scorePoints(d),
+                  canonical ? d.ellipse_x : [],
+                  canonical ? d.ellipse_y : [],
+                  axisName(d, scoresX),
+                  axisName(d, scoresY)
+                )}
+              />
             {/if}
           </div>
           <div class="card">
@@ -132,7 +204,19 @@
             {#if oneComponent}
               <Chart option={oneComponentOption(d.x_loadings.variable_names, loadingValues(d), axis(d, 0), oneAxisKind, 'variable')} />
             {:else}
-              <Chart option={loadingsOption(loadingPoints(d), axis(d, 0), axis(d, 1))} />
+              <div class="axis-pick">
+                <label>X
+                  <select bind:value={loadingsX}>
+                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+                  </select>
+                </label>
+                <label>Y
+                  <select bind:value={loadingsY}>
+                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
+                  </select>
+                </label>
+              </div>
+              <Chart option={loadingsOption(loadingPoints(d), axisName(d, loadingsX), axisName(d, loadingsY))} />
             {/if}
           </div>
           <div class="card">
@@ -240,6 +324,21 @@
     gap: 0.4rem;
   }
   .chart-kind select {
+    padding: 0.2rem;
+  }
+  .axis-pick {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .axis-pick label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .axis-pick select {
     padding: 0.2rem;
   }
   .card {
