@@ -64,6 +64,13 @@ class SampleInfo(ApiModel):
     source_url: str
 
 
+class DatasetUrlRequest(ApiModel):
+    """Request to import a dataset from a CSV/Excel file at a URL."""
+
+    url: str
+    sheet: str | None = None
+
+
 # --- Preprocessing spec (per model variant) ---------------------------------
 
 

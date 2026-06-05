@@ -4,6 +4,7 @@
     listDatasets,
     listSamples,
     loadSample,
+    openDatasetFromUrl,
     uploadDataset,
     type DatasetDetail,
     type SampleInfo
@@ -13,6 +14,7 @@
   let datasets = $state<DatasetDetail[]>([]);
   let samples = $state<SampleInfo[]>([]);
   let busy = $state(false);
+  let url = $state('');
 
   async function refresh() {
     try {
@@ -52,6 +54,19 @@
       busy = false;
     }
   }
+
+  async function onOpenUrl() {
+    if (!url.trim()) return;
+    busy = true;
+    try {
+      const dataset = await openDatasetFromUrl(url.trim());
+      await goto(`/datasets/${dataset.dataset_id}`);
+    } catch (e) {
+      showError((e as Error).message);
+    } finally {
+      busy = false;
+    }
+  }
 </script>
 
 <main>
@@ -68,7 +83,18 @@
       onchange={onFile}
       disabled={busy}
     />
-    {#if busy}<span class="hint">Uploading…</span>{/if}
+    <p class="hint or">or open from a URL (max 5 MB):</p>
+    <form class="url-row" onsubmit={(e) => { e.preventDefault(); void onOpenUrl(); }}>
+      <input
+        type="url"
+        data-testid="url-input"
+        placeholder="https://example.com/data.csv"
+        bind:value={url}
+        disabled={busy}
+      />
+      <button type="submit" disabled={busy || !url.trim()}>Open</button>
+    </form>
+    {#if busy}<span class="hint">Loading…</span>{/if}
   </section>
 
   {#if samples.length}
@@ -137,6 +163,21 @@
   .panel h2 {
     margin-top: 0;
     font-size: 1.05rem;
+  }
+  .or {
+    margin-bottom: 0.35rem;
+  }
+  .url-row {
+    display: flex;
+    gap: 0.5rem;
+    max-width: 32rem;
+  }
+  .url-row input {
+    flex: 1;
+    padding: 0.35rem 0.5rem;
+  }
+  .url-row button {
+    padding: 0.35rem 0.8rem;
   }
   ul {
     margin: 0;

@@ -364,6 +364,56 @@ def test_load_unknown_sample_is_404(client: TestClient) -> None:
     assert client.post("/api/datasets/samples/nope").status_code == 404
 
 
+class _FakeUrlResponse:
+    """Minimal stand-in for urllib's response, used to avoid real network I/O."""
+
+    def __init__(self, data: bytes, headers: dict[str, str] | None = None) -> None:
+        self._data = data
+        self._pos = 0
+        self.headers = headers or {}
+
+    def read(self, size: int = -1) -> bytes:
+        end = len(self._data) if size is None or size < 0 else self._pos + size
+        chunk = self._data[self._pos : end]
+        self._pos += len(chunk)
+        return chunk
+
+    def __enter__(self) -> _FakeUrlResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+def test_open_dataset_from_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_a, **_k: _FakeUrlResponse(_csv_bytes()),
+    )
+    response = client.post("/api/datasets/from-url", json={"url": "https://example.com/data.csv"})
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["source"] == "url"
+    assert body["n_rows"] == 30
+
+
+def test_open_dataset_from_url_rejects_non_http(client: TestClient) -> None:
+    response = client.post("/api/datasets/from-url", json={"url": "file:///etc/passwd"})
+    assert response.status_code == 400
+
+
+def test_open_dataset_from_url_rejects_oversized(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    big = {"Content-Length": str(6 * 1024 * 1024)}
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_a, **_k: _FakeUrlResponse(b"x", headers=big),
+    )
+    response = client.post("/api/datasets/from-url", json={"url": "https://example.com/big.csv"})
+    assert response.status_code == 413
+
+
 def test_spa_fallback_serves_index(client: TestClient) -> None:
     response = client.get("/some/client/route")
     assert response.status_code == 200

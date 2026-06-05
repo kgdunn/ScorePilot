@@ -116,6 +116,17 @@ export async function listDatasets(): Promise<DatasetDetail[]> {
   return asJson(await fetch('/api/datasets'));
 }
 
+/** Import a dataset from a CSV/Excel file at a public URL (max 5 MB). */
+export async function openDatasetFromUrl(url: string): Promise<DatasetDetail> {
+  return asJson(
+    await fetch('/api/datasets/from-url', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url })
+    })
+  );
+}
+
 export async function getDataset(id: string): Promise<DatasetDetail> {
   return asJson(await fetch(`/api/datasets/${id}`));
 }
