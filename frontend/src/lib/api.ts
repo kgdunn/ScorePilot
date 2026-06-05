@@ -150,15 +150,26 @@ export async function patchColumn(
 }
 
 /** Fetch the full grid by paging the windowed endpoint. */
-export async function getGridAll(id: string, form: 'raw' | 'scaled' = 'raw'): Promise<GridWindow> {
+export async function getGridAll(
+  id: string,
+  form: 'raw' | 'scaled' = 'raw',
+  transforms?: Record<string, { kind: TransformKind; c1: number; c2: number }>
+): Promise<GridWindow> {
   const pageSize = 1000;
   let offset = 0;
   const cells: (string | null)[][] = [];
   const rowIds: (string | null)[] = [];
   let columnNames: string[] = [];
+  // Transforms only affect the scaled view; skip the param otherwise.
+  const transformParam =
+    form === 'scaled' && transforms && Object.keys(transforms).length
+      ? `&transforms=${encodeURIComponent(JSON.stringify(transforms))}`
+      : '';
   for (;;) {
     const window = await asJson<GridWindow>(
-      await fetch(`/api/datasets/${id}/grid?row_offset=${offset}&row_limit=${pageSize}&form=${form}`)
+      await fetch(
+        `/api/datasets/${id}/grid?row_offset=${offset}&row_limit=${pageSize}&form=${form}${transformParam}`
+      )
     );
     columnNames = window.column_names;
     cells.push(...window.cells);
@@ -173,11 +184,13 @@ export async function getVariable(
   id: string,
   column: string,
   transform: TransformKind = 'none',
-  form: 'raw' | 'scaled' = 'raw'
+  form: 'raw' | 'scaled' = 'raw',
+  excludedRows: number[] = []
 ): Promise<VariableInspector> {
   const params = new URLSearchParams();
   if (transform !== 'none') params.set('transform', transform);
   if (form !== 'raw') params.set('form', form);
+  for (const r of excludedRows) params.append('excluded_rows', String(r));
   const query = params.toString() ? `?${params}` : '';
   return asJson(
     await fetch(`/api/datasets/${id}/variables/${encodeURIComponent(column)}${query}`)

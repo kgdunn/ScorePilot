@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -193,6 +194,24 @@ def test_grid_raw_and_scaled(client: TestClient) -> None:
     assert scaled["cells"][0][0] == raw["cells"][0][0]
 
 
+def test_grid_scaled_applies_transforms(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    plain = client.get(f"/api/datasets/{dataset_id}/grid?row_limit=5&form=scaled").json()
+    transforms = json.dumps({"v0": {"kind": "exponential", "c1": 0.0, "c2": 1.0}})
+    transformed = client.get(
+        f"/api/datasets/{dataset_id}/grid?row_limit=5&form=scaled&transforms={transforms}"
+    ).json()
+    # The transformed column (index 1) changes; the identifier (index 0) does not.
+    assert transformed["cells"][0][1] != plain["cells"][0][1]
+    assert transformed["cells"][0][0] == plain["cells"][0][0]
+
+
+def test_grid_invalid_transforms_param_is_400(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    response = client.get(f"/api/datasets/{dataset_id}/grid?form=scaled&transforms=not-json")
+    assert response.status_code == 400
+
+
 def test_variable_inspector(client: TestClient) -> None:
     dataset_id = _upload_csv(client)["dataset_id"]
     inspector = client.get(f"/api/datasets/{dataset_id}/variables/v0").json()
@@ -200,6 +219,17 @@ def test_variable_inspector(client: TestClient) -> None:
     assert inspector["n"] == 30
     assert sum(inspector["histogram_counts"]) == 30
     assert len(inspector["sequence"]) == 30
+
+
+def test_variable_inspector_excludes_rows(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    full = client.get(f"/api/datasets/{dataset_id}/variables/v0").json()
+    trimmed = client.get(
+        f"/api/datasets/{dataset_id}/variables/v0?excluded_rows=0&excluded_rows=1&excluded_rows=2"
+    ).json()
+    # Excluding three rows drops them from the stats and the sequence/plots.
+    assert trimmed["n"] == full["n"] - 3
+    assert len(trimmed["sequence"]) == len(full["sequence"]) - 3
 
 
 def test_variable_inspector_scaled(client: TestClient) -> None:

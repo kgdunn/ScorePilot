@@ -43,7 +43,7 @@
     loading = true;
     try {
       detail = await getDataset(datasetId);
-      grid = await getGridAll(datasetId, form);
+      grid = await getGridAll(datasetId, form, draft.transforms);
       quality = await getQuality(datasetId);
     } catch (e) {
       showError((e as Error).message);
@@ -111,6 +111,7 @@
     }
     if (draft.excludedColumns.includes(columnId)) classes.push('c-excluded-col');
     if (invalidByColumn.get(columnId)?.has(row)) classes.push('c-invalid');
+    else if (getCell(row, columnId) === null) classes.push('c-missing');
     return classes.join(' ');
   }
 
@@ -141,7 +142,7 @@
     if (!selected) return;
     try {
       detail = await patchColumn(datasetId, selected, { column_type: type });
-      grid = await getGridAll(datasetId, form);
+      grid = await getGridAll(datasetId, form, draft.transforms);
     } catch (e) {
       showError((e as Error).message);
     }
@@ -171,14 +172,16 @@
 
   async function toggleForm() {
     form = form === 'raw' ? 'scaled' : 'raw';
-    grid = await getGridAll(datasetId, form);
+    grid = await getGridAll(datasetId, form, draft.transforms);
   }
 
-  function applyTransform(column: string, transform: TransformKind) {
+  async function applyTransform(column: string, transform: TransformKind) {
     const transforms = { ...draft.transforms };
     if (transform === 'none') delete transforms[column];
     else transforms[column] = { kind: transform, c1: 0, c2: 1 };
     draft = { ...draft, transforms };
+    // Keep the scaled table consistent with the inspector's scaled plots.
+    if (form === 'scaled') grid = await getGridAll(datasetId, form, transforms);
   }
 
   function effectiveXColumns(): string[] {
@@ -274,6 +277,7 @@
             column={selected}
             {form}
             appliedTransform={draft.transforms[selected]?.kind ?? 'none'}
+            excludedRows={draft.excludedRows}
             onApplyTransform={applyTransform}
           />
         {:else}
@@ -428,6 +432,10 @@
     background: #fdecea;
     color: #b3261e;
   }
+  /* Light orange flags an empty (missing) cell. */
+  .explorer :global(.dg-cell.c-missing) {
+    background: #ffe8cc;
+  }
   .build-area {
     border: 1px solid #e2e2e2;
     border-radius: 8px;
@@ -475,10 +483,13 @@
     color: #b3261e;
   }
 
-  /* On narrow screens, stack the inspector below the grid instead of beside it. */
+  /* On narrow screens, stack the inspector below the grid instead of beside it.
+     The track stays `minmax(0, 1fr)` (not `1fr`) so the wide grid scrolls inside
+     its own viewport instead of widening the page - that keeps the sticky ribbon
+     pinned instead of being dragged sideways by horizontal page scroll. */
   @media (max-width: 900px) {
     .main {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
     .grid-area {
       height: 52vh;
