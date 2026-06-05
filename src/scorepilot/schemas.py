@@ -274,6 +274,16 @@ class ModelDetail(ApiModel):
     diagnostics: ModelDiagnosticsModel | None
 
 
+class ContributionsModel(ApiModel):
+    """Per-variable contributions of one observation to T2 and SPE."""
+
+    observation: int
+    observation_name: str
+    variable_names: list[str]
+    t2: list[float]
+    spe: list[float]
+
+
 class FitModelRequest(ApiModel):
     """Request to fit a model variant from a dataset and a preprocessing spec."""
 

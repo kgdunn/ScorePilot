@@ -304,3 +304,19 @@ export async function listModels(): Promise<ModelSummary[]> {
 export async function getModel(id: number): Promise<ModelDetail> {
   return asJson(await fetch(`/api/models/${id}`));
 }
+
+export interface Contributions {
+  observation: number;
+  observation_name: string;
+  variable_names: string[];
+  t2: number[];
+  spe: number[];
+}
+
+/** Per-variable contributions of one observation to the model's T2 and SPE. */
+export async function getContributions(
+  modelId: number,
+  observation: number
+): Promise<Contributions> {
+  return asJson(await fetch(`/api/models/${modelId}/contributions/${observation}`));
+}

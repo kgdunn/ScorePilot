@@ -43,6 +43,39 @@ class ModelDiagnostics:
     vip: dict[str, float]
 
 
+def _fit_estimator(
+    x_block: pd.DataFrame,
+    y_block: pd.DataFrame | None,
+    kind: ModelKind,
+    n_components: int,
+) -> PCA | PLS:
+    """Validate inputs and fit the underlying PCA/PLS estimator.
+
+    Raises
+    ------
+    ValueError
+        For an unknown ``kind``, a PLS fit without Y columns, or an out-of-range
+        ``n_components``.
+    """
+    max_components = min(x_block.shape)
+    if not 1 <= n_components <= max_components:
+        msg = (
+            f"n_components must be between 1 and {max_components} for X of shape "
+            f"{x_block.shape}, got {n_components}"
+        )
+        raise ValueError(msg)
+
+    if kind == "PLS":
+        if y_block is None or y_block.shape[1] == 0:
+            msg = "PLS requires at least one Y column."
+            raise ValueError(msg)
+        return PLS(n_components=n_components, scale=False).fit(x_block, y_block)
+    if kind == "PCA":
+        return PCA(n_components=n_components).fit(x_block)
+    msg = f"Unknown model kind: {kind!r} (expected 'PCA' or 'PLS')"
+    raise ValueError(msg)
+
+
 def fit_model(
     x_block: pd.DataFrame,
     y_block: pd.DataFrame | None,
@@ -63,28 +96,13 @@ def fit_model(
         For an unknown ``kind``, a PLS fit without Y columns, or an out-of-range
         ``n_components``.
     """
-    max_components = min(x_block.shape)
-    if not 1 <= n_components <= max_components:
-        msg = (
-            f"n_components must be between 1 and {max_components} for X of shape "
-            f"{x_block.shape}, got {n_components}"
-        )
-        raise ValueError(msg)
-
+    model = _fit_estimator(x_block, y_block, kind, n_components)
     if kind == "PLS":
-        if y_block is None or y_block.shape[1] == 0:
-            msg = "PLS requires at least one Y column."
-            raise ValueError(msg)
-        model = PLS(n_components=n_components, scale=False).fit(x_block, y_block)
         x_loadings = cast("pd.DataFrame", model.x_loadings_)
         y_loadings: pd.DataFrame | None = cast("pd.DataFrame", model.y_loadings_)
-    elif kind == "PCA":
-        model = PCA(n_components=n_components).fit(x_block)
+    else:
         x_loadings = cast("pd.DataFrame", model.loadings_)
         y_loadings = None
-    else:
-        msg = f"Unknown model kind: {kind!r} (expected 'PCA' or 'PLS')"
-        raise ValueError(msg)
 
     component_names = [f"PC{i}" for i in range(1, n_components + 1)]
     scores = cast("pd.DataFrame", model.scores_).copy()
@@ -132,4 +150,66 @@ def fit_model(
         ellipse_x=ellipse_x,
         ellipse_y=ellipse_y,
         vip=vip_map,
+    )
+
+
+@dataclass(frozen=True)
+class Contributions:
+    """Per-variable contributions of one observation to T2 and SPE."""
+
+    observation: int
+    observation_name: str
+    variable_names: list[str]
+    t2: list[float]
+    spe: list[float]
+
+
+def observation_contributions(
+    x_block: pd.DataFrame,
+    y_block: pd.DataFrame | None,
+    kind: ModelKind,
+    n_components: int,
+    observation: int,
+) -> Contributions:
+    """Per-variable contributions of one observation to Hotelling's T2 and SPE.
+
+    The T2 contributions sum to that observation's T2; the SPE contributions are
+    its signed per-variable residuals (their squares sum to its SPE). ``x_block``
+    (and ``y_block`` for PLS) must be the preprocessed blocks from ``apply_spec``.
+
+    Raises
+    ------
+    ValueError
+        For an out-of-range ``observation`` index, or any error from the fit.
+    """
+    n_rows = x_block.shape[0]
+    if not 0 <= observation < n_rows:
+        msg = f"observation must be between 0 and {n_rows - 1}, got {observation}"
+        raise ValueError(msg)
+
+    model = _fit_estimator(x_block, y_block, kind, n_components)
+    loadings = model.loadings_ if kind == "PCA" else model.x_loadings_
+    directions = model.loadings_ if kind == "PCA" else model.direct_weights_
+    p_mat = np.asarray(loadings, dtype=float)  # K x A (reconstruction)
+    r_mat = np.asarray(directions, dtype=float)  # K x A, scores T = X @ R
+    scores = np.asarray(model.scores_, dtype=float)  # n x A
+
+    score_var = scores.var(axis=0, ddof=1)
+    score_var = np.where(score_var > 0, score_var, 1.0)
+
+    x_i = np.asarray(x_block.to_numpy(), dtype=float)[observation]  # K
+    t_i = scores[observation]  # A
+
+    # T2 contribution of variable k: sum_a (t_a / s_a^2) * R[k, a] * x_k. Summed
+    # over k this telescopes to sum_a t_a^2 / s_a^2 = the observation's T2.
+    t2_contrib = (r_mat @ (t_i / score_var)) * x_i
+    # SPE residual of variable k: x_k minus its reconstruction; squares sum to SPE.
+    spe_contrib = x_i - (p_mat @ t_i)
+
+    return Contributions(
+        observation=observation,
+        observation_name=str(x_block.index[observation]),
+        variable_names=[str(c) for c in x_block.columns.astype(str)],
+        t2=[float(v) for v in t2_contrib],
+        spe=[float(v) for v in spe_contrib],
     )

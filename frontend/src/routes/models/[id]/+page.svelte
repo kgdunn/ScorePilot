@@ -1,9 +1,16 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { getModel, type ModelDetail, type ModelDiagnostics } from '$lib/api';
+  import {
+    getContributions,
+    getModel,
+    type Contributions,
+    type ModelDetail,
+    type ModelDiagnostics
+  } from '$lib/api';
   import { showError } from '$lib/toast.svelte';
   import { formatDateTime } from '$lib/format';
-  import Chart from '$lib/components/Chart.svelte';
+  import Chart, { type ChartActivation } from '$lib/components/Chart.svelte';
+  import ContributionModal from '$lib/components/ContributionModal.svelte';
   import {
     barWithLimitOption,
     loadingsOption,
@@ -115,6 +122,24 @@
   const pageTitle = $derived(
     detail ? `${detail.summary.name ?? `Model ${detail.summary.id}`} · ScorePilot` : 'ScorePilot'
   );
+
+  // Contribution-plot modal: opened by double-click / long-press on a score,
+  // T2, or SPE point. Scores explain outlyingness via T2; SPE bars via SPE.
+  let contribution = $state<Contributions | null>(null);
+  let contributionMetric = $state<'t2' | 'spe'>('t2');
+
+  async function openContribution(observation: number, metric: 't2' | 'spe') {
+    try {
+      contribution = await getContributions(id, observation);
+      contributionMetric = metric;
+    } catch (e) {
+      showError((e as Error).message);
+    }
+  }
+
+  const onScoreActivate = (a: ChartActivation) => openContribution(a.dataIndex, 't2');
+  const onT2Activate = (a: ChartActivation) => openContribution(a.dataIndex, 't2');
+  const onSpeActivate = (a: ChartActivation) => openContribution(a.dataIndex, 'spe');
 </script>
 
 <svelte:head><title>{pageTitle}</title></svelte:head>
@@ -156,6 +181,7 @@
       {@const d = detail.diagnostics}
       {@const oneComponent = d.n_components < 2}
       <section class="diagnostics" data-testid="diagnostics">
+        <p class="hint">Double-click or long-press a point on the scores, T², or SPE plot to see its contribution plot.</p>
         {#if oneComponent}
           <div class="chart-kind">
             <label>
@@ -173,7 +199,10 @@
           <div class="card">
             <h3>Scores (with T² limit)</h3>
             {#if oneComponent}
-              <Chart option={oneComponentOption(d.scores.observation_names, scoreValues(d), axis(d, 0), oneAxisKind, 'observation')} />
+              <Chart
+                option={oneComponentOption(d.scores.observation_names, scoreValues(d), axis(d, 0), oneAxisKind, 'observation')}
+                onactivate={onScoreActivate}
+              />
             {:else}
               {@const canonical = scoresX === 0 && scoresY === 1}
               <div class="axis-pick">
@@ -196,6 +225,7 @@
                   axisName(d, scoresX),
                   axisName(d, scoresY)
                 )}
+                onactivate={onScoreActivate}
               />
             {/if}
           </div>
@@ -221,11 +251,17 @@
           </div>
           <div class="card">
             <h3>Hotelling's T²</h3>
-            <Chart option={barWithLimitOption(d.scores.observation_names, d.hotellings_t2, d.t2_limit, 'T²')} />
+            <Chart
+              option={barWithLimitOption(d.scores.observation_names, d.hotellings_t2, d.t2_limit, 'T²')}
+              onactivate={onT2Activate}
+            />
           </div>
           <div class="card">
             <h3>SPE (DModX)</h3>
-            <Chart option={barWithLimitOption(d.scores.observation_names, d.spe, d.spe_limit, 'SPE')} />
+            <Chart
+              option={barWithLimitOption(d.scores.observation_names, d.spe, d.spe_limit, 'SPE')}
+              onactivate={onSpeActivate}
+            />
           </div>
           <div class="card wide">
             <h3>VIP</h3>
@@ -241,6 +277,14 @@
     {/if}
   {/if}
 </main>
+
+{#if contribution}
+  <ContributionModal
+    contributions={contribution}
+    metric={contributionMetric}
+    onclose={() => (contribution = null)}
+  />
+{/if}
 
 <style>
   :global(body) {

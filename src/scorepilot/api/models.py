@@ -13,10 +13,12 @@ from scorepilot.core import (
     PreprocessingSpec,
     apply_spec,
     fit_model,
+    observation_contributions,
 )
 from scorepilot.dataset_store import Dataset
 from scorepilot.db import Model
 from scorepilot.schemas import (
+    ContributionsModel,
     FitModelRequest,
     FitPCARequest,
     LoadingsPayload,
@@ -195,6 +197,46 @@ def get_model(model_id: int, store: DatasetStoreDep, repository: RepositoryDep) 
         excluded_samples=list(model.excluded_samples),
         lineage=[_summary(m) for m in repository.lineage(model.id)],
         diagnostics=diagnostics,
+    )
+
+
+@router.get("/{model_id}/contributions/{observation}", response_model=ContributionsModel)
+def model_contributions(
+    model_id: int, observation: int, store: DatasetStoreDep, repository: RepositoryDep
+) -> ContributionsModel:
+    """Per-variable contributions of one observation to the model's T2 and SPE.
+
+    Used by the contribution-plot modal when a score, T2, or SPE point is opened.
+    """
+    model = repository.get(model_id)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown model id: {model_id}"
+        )
+    dataset = store.get(model.dataset_id) if model.dataset_id else None
+    if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source dataset is no longer loaded; cannot compute contributions.",
+        )
+
+    spec = PreprocessingSpec.from_dict(model.preprocessing)
+    applied = apply_spec(dataset.raw, spec)
+    try:
+        contrib = observation_contributions(
+            applied.X, applied.Y, model.kind, model.n_components, observation
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    return ContributionsModel(
+        observation=contrib.observation,
+        observation_name=contrib.observation_name,
+        variable_names=contrib.variable_names,
+        t2=contrib.t2,
+        spe=contrib.spe,
     )
 
 

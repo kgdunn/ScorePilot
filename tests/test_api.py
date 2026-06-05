@@ -287,6 +287,37 @@ def test_fit_model_hangar_and_logbook(client: TestClient) -> None:
     assert [s["id"] for s in v["lineage"]] == [model_id, v["summary"]["id"]]
 
 
+def test_model_contributions(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 2}
+    )
+    model_id = created.json()["summary"]["id"]
+    diag = created.json()["diagnostics"]
+
+    obs = 3
+    response = client.get(f"/api/models/{model_id}/contributions/{obs}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["observation"] == obs
+    assert len(body["t2"]) == len(diag["x_loadings"]["variable_names"])
+    assert len(body["spe"]) == len(body["variable_names"])
+    # T2 contributions sum to the observation's Hotelling's T2.
+    assert abs(sum(body["t2"]) - diag["hotellings_t2"][obs]) < 1e-6
+    # SPE is the residual norm, so squared contributions sum to spe**2.
+    assert abs(sum(v * v for v in body["spe"]) - diag["spe"][obs] ** 2) < 1e-6
+
+
+def test_model_contributions_out_of_range_422(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 2}
+    )
+    model_id = created.json()["summary"]["id"]
+    response = client.get(f"/api/models/{model_id}/contributions/9999")
+    assert response.status_code == 422
+
+
 def test_fit_pls_model(client: TestClient) -> None:
     dataset_id = _upload_csv(client)["dataset_id"]
     response = client.post(
