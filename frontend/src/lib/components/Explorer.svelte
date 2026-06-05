@@ -127,6 +127,12 @@
     }
   }
 
+  // Keyboard navigation: as the focused cell moves across columns, select that
+  // column so the inspector's distribution follows along.
+  function onCellFocus(_row: number, columnId: string) {
+    if (columnId !== '__id') selected = columnId;
+  }
+
   const selectedMeta = $derived(selected ? (metaByName.get(selected) ?? null) : null);
 
   async function setIdentifier(role: IdentifierRole) {
@@ -238,7 +244,7 @@
       <span class="chip x">X</span><span class="chip y">Y</span>
       <span class="chip idr">identifier</span><span class="chip ex">excluded</span>
       <span class="chip inv">invalid</span>
-      <span class="muted">Click a header to select a column; click a row id to exclude it.</span>
+      <span class="muted">Click a header or cell to select a column; arrow keys move between cells; click a row id to exclude it.</span>
     </div>
 
     <div class="main">
@@ -254,6 +260,7 @@
             {headerClass}
             onheaderclick={onHeaderClick}
             oncellclick={onCellClick}
+            oncellfocus={onCellFocus}
           >
             {#snippet headerCell(col)}
               {#if col.id === '__id'}
