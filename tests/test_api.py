@@ -459,14 +459,64 @@ def test_open_dataset_from_url_rejects_oversized(
     assert response.status_code == 413
 
 
-def test_upload_rejects_oversized(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("scorepilot.api.datasets.MAX_UPLOAD_BYTES", 1024)
-    payload = b"a,b,c\n" + b"1,2,3\n" * 1000
-    response = client.post(
-        "/api/datasets",
-        files={"file": ("big.csv", payload, "text/csv")},
-    )
+def test_upload_rejects_oversized(tmp_path: Path) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'cap.db'}", max_upload_mb=1)
+    with TestClient(create_app(settings)) as client:
+        payload = b"a,b,c\n" + b"1,2,3\n" * 200_000  # ~1.2 MB, over the 1 MB cap
+        response = client.post(
+            "/api/datasets",
+            files={"file": ("big.csv", payload, "text/csv")},
+        )
     assert response.status_code == 413
+
+
+def test_upload_rejects_too_many_cells(tmp_path: Path) -> None:
+    # A tiny CSV that parses to more cells than the configured limit is refused,
+    # bounding what a small but expansive file can turn into.
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'cells.db'}", max_cells=10)
+    with TestClient(create_app(settings)) as client:
+        csv = b"a,b,c\n" + b"1,2,3\n" * 20  # 20 rows x 4 cols (Row id added) > 10
+        response = client.post(
+            "/api/datasets",
+            files={"file": ("wide.csv", csv, "text/csv")},
+        )
+    assert response.status_code == 413
+
+
+def test_auth_gate_blocks_and_allows(tmp_path: Path) -> None:
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'auth.db'}",
+        auth_password="s3cret",
+    )
+    with TestClient(create_app(settings)) as client:
+        # Health stays open for proxy/container health checks.
+        assert client.get("/api/health").status_code == 200
+        # Everything else demands credentials.
+        anon = client.get("/api/datasets")
+        assert anon.status_code == 401
+        assert anon.headers["WWW-Authenticate"].startswith("Basic")
+        # Wrong password is refused; correct one passes.
+        assert client.get("/api/datasets", auth=("scorepilot", "nope")).status_code == 401
+        ok = client.get("/api/datasets", auth=("scorepilot", "s3cret"))
+        assert ok.status_code == 200
+
+
+def test_docs_served_by_default(client: TestClient) -> None:
+    schema = client.get("/api/openapi.json")
+    assert schema.status_code == 200
+    assert schema.json()["openapi"].startswith("3.")
+    assert "swagger" in client.get("/api/docs").text.lower()
+
+
+def test_docs_can_be_disabled(tmp_path: Path) -> None:
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'nodocs.db'}", docs_enabled=False)
+    with TestClient(create_app(settings)) as client:
+        # The OpenAPI schema is no longer served as JSON (the SPA catch-all answers
+        # instead), and the Swagger UI is gone.
+        assert "application/json" not in client.get("/api/openapi.json").headers.get(
+            "content-type", ""
+        )
+        assert "swagger" not in client.get("/api/docs").text.lower()
 
 
 def test_spa_fallback_serves_index(client: TestClient) -> None:

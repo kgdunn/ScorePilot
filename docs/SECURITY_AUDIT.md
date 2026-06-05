@@ -1,11 +1,13 @@
 # Security & maintainability audit
 
 A black-hat / white-hat pass over ScorePilot. Each finding records the risk, the
-exploit reasoning, and what was done about it. The app currently ships **no
-authentication**, so every endpoint is reachable by anyone who can reach the
-deployed instance (see the `deploy/` stack on a public Hetzner host) — that
-raises the stakes for the server-side request and resource-exhaustion findings
-below.
+exploit reasoning, and what was done about it.
+
+The design is **local-first** (`uvx scorepilot` for a single scientist) with an
+optional public deploy (the `deploy/` stack on a Hetzner host). The fixes follow
+that grain: input-validation and resource bounds are always on, while the
+access-control knobs (auth, docs visibility) are **opt-in/opt-out via settings**
+so the local launch stays frictionless and a deploy can be locked down.
 
 ## Fixed in this pass
 
@@ -53,18 +55,44 @@ release.
 (`importlib.metadata.version`), and `create_app()` passes it to FastAPI, so the
 single source of truth is `pyproject.toml`.
 
+### 4. No authentication / authorization — *High (deploy)* — fixed (opt-in)
+
+Every endpoint was world-readable and world-writable; the public deploy was an
+open, unauthenticated compute/storage endpoint.
+
+**Fix:** an optional HTTP Basic gate in `create_app()`, **inactive until
+`SCOREPILOT_AUTH_PASSWORD` is set** so the local `uvx scorepilot` launch keeps
+working with no login. When set, it covers the whole app (API, docs, and the
+static SPA) using a constant-time credential check; `/api/health` stays open for
+proxy/container health checks. The browser handles the credential prompt
+natively, so the SPA needed no changes. Documented in `deploy/.env.example` and
+`docs/DEPLOYMENT.md`.
+
+### 5. Interactive API docs always on — *Low* — fixed (opt-out)
+
+`/api/docs` and `/api/openapi.json` were always served. They're now gated by
+`SCOREPILOT_DOCS_ENABLED` (default on for local use; the deploy `.env` turns them
+off). With the auth gate enabled they're protected regardless.
+
+### 6. Decompression / expansion amplification — *Medium* — fixed
+
+A small-but-expansive upload (notably a zip-compressed `.xlsx`) could parse into a
+huge in-memory frame even under the byte cap. A post-parse cell-count guard
+(`max_cells`, default 50 M) now rejects oversized tables with `413`, and the byte
+cap and cell cap are both configurable (`SCOREPILOT_MAX_UPLOAD_MB`,
+`SCOREPILOT_MAX_CELLS`).
+
 ## Observations worth tracking (not changed here)
 
-- **No authentication / authorization, no rate limiting.** Every dataset and
-  model is globally readable and writable. Fine for a single-user local launch,
-  but the public deploy is effectively an open, unauthenticated compute/storage
-  endpoint. A future auth layer (even a single shared token) is the highest-value
-  next step.
-- **Interactive API docs are always on** (`/api/docs`, `/api/openapi.json`).
-  Harmless, but consider gating them behind a setting in production.
-- **Decompression amplification.** A within-cap gzip/`.xlsx` upload can still
-  expand to a large in-memory frame during parsing. The upload cap bounds the
-  input but not the post-parse footprint; worth a row/column cap if abuse shows up.
+- **Rate limiting belongs at the reverse proxy.** Behind the host Caddy the app
+  only sees the proxy's IP, so an in-process per-IP limiter would throttle all
+  users together. `docs/DEPLOYMENT.md` now shows a Caddy `rate_limit` block, which
+  sees real client IPs — the correct layer. The auth gate already stops anonymous
+  abuse.
+- **DNS rebinding (residual on the SSRF guard).** A host can resolve to a public
+  IP at validation time and a private IP at connection time. Closing it fully
+  means connecting to the validated IP with a pinned `Host` header (awkward with
+  `urllib`); deferred and noted in finding #1.
 - **Pandas `read_csv`/`ExcelFile` on untrusted input.** No formula/CSV-injection
   concern server-side (values are never re-emitted as a spreadsheet), but keep it
   in mind if an export feature is added.

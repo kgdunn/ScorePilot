@@ -21,7 +21,11 @@ services:
 
   app:
     image: ghcr.io/kgdunn/scorepilot:latest
+    # Forward the .env file so SCOREPILOT_* knobs (auth, docs, caps) reach the
+    # container; non-prefixed keys (POSTGRES_*, APP_PORT) are ignored by the app.
+    env_file: .env
     environment:
+      # Set explicitly (not in .env) so the compose-interpolated credentials win.
       SCOREPILOT_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     # Publish on loopback only; the host reverse proxy reaches it here.
     # Override the host port with APP_PORT in .env if 8003 is taken.

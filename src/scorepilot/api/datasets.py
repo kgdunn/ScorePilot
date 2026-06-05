@@ -17,9 +17,10 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
+import pandas as pd
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
-from scorepilot.api.deps import DatasetStoreDep
+from scorepilot.api.deps import DatasetStoreDep, SettingsDep
 from scorepilot.core import IdentifierRole
 from scorepilot.core._pandas import column as get_column
 from scorepilot.dataset_store import Dataset, is_valid_primary, load_table
@@ -36,10 +37,6 @@ router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 # Cap remote imports so a huge URL cannot exhaust memory.
 MAX_URL_BYTES = 5 * 1024 * 1024
-
-# Cap direct uploads too, so an unauthenticated POST cannot exhaust memory by
-# streaming an arbitrarily large body into the process.
-MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 def _host_addresses(host: str) -> list[str]:
@@ -138,30 +135,44 @@ def to_detail(dataset: Dataset) -> DatasetDetail:
     )
 
 
-async def _read_capped(file: UploadFile) -> bytes:
-    """Read an uploaded file fully, but refuse bodies over ``MAX_UPLOAD_BYTES``."""
+async def _read_capped(file: UploadFile, limit_bytes: int) -> bytes:
+    """Read an uploaded file fully, but refuse bodies over ``limit_bytes``."""
     chunks: list[bytes] = []
     total = 0
     while chunk := await file.read(1024 * 1024):
         total += len(chunk)
-        if total > MAX_UPLOAD_BYTES:
-            limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+        if total > limit_bytes:
             raise HTTPException(
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=f"That file is larger than the {limit_mb} MB limit.",
+                detail=f"That file is larger than the {limit_bytes // (1024 * 1024)} MB limit.",
             )
         chunks.append(chunk)
     return b"".join(chunks)
 
 
+def _guard_frame_size(frame: pd.DataFrame, max_cells: int) -> None:
+    """Refuse a parsed table whose cell count exceeds ``max_cells``.
+
+    The byte cap bounds the *input*; this bounds what a small but highly
+    compressed file (e.g. an ``.xlsx``) can expand into once parsed.
+    """
+    n_cells = int(frame.shape[0]) * int(frame.shape[1])
+    if n_cells > max_cells:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"That table has {n_cells} cells, over the {max_cells}-cell limit.",
+        )
+
+
 @router.post("", response_model=DatasetDetail, status_code=status.HTTP_201_CREATED)
 async def upload_dataset(
     store: DatasetStoreDep,
+    settings: SettingsDep,
     file: Annotated[UploadFile, File(description="A CSV or Excel file")],
     sheet: Annotated[str | None, Query(description="Excel sheet name")] = None,
 ) -> DatasetDetail:
     """Import a CSV or Excel file as a dataset."""
-    raw = await _read_capped(file)
+    raw = await _read_capped(file, settings.max_upload_mb * 1024 * 1024)
     filename = file.filename or "dataset.csv"
     try:
         frame, source, sheets, used = load_table(raw, filename, sheet)
@@ -176,6 +187,7 @@ async def upload_dataset(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No columns found in the uploaded file.",
         )
+    _guard_frame_size(frame, settings.max_cells)
 
     dataset = store.add(filename, frame, source=source, sheets=sheets, sheet=used)
     return to_detail(dataset)
@@ -221,7 +233,9 @@ def _fetch_url(url: str) -> tuple[bytes, str]:
 
 
 @router.post("/from-url", response_model=DatasetDetail, status_code=status.HTTP_201_CREATED)
-def open_dataset_from_url(request: DatasetUrlRequest, store: DatasetStoreDep) -> DatasetDetail:
+def open_dataset_from_url(
+    request: DatasetUrlRequest, store: DatasetStoreDep, settings: SettingsDep
+) -> DatasetDetail:
     """Import a dataset from a CSV/Excel file at a public URL (max 5 MB)."""
     content, filename = _fetch_url(request.url)
     try:
@@ -237,6 +251,7 @@ def open_dataset_from_url(request: DatasetUrlRequest, store: DatasetStoreDep) ->
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No columns found in the fetched file.",
         )
+    _guard_frame_size(frame, settings.max_cells)
 
     dataset = store.add(filename, frame, source="url", sheets=sheets, sheet=used)
     return to_detail(dataset)
