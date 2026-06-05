@@ -18,6 +18,32 @@ class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
 
+class DatasetRecord(Base):
+    """An imported dataset, persisted so it survives a restart.
+
+    Queryable metadata lives in real columns and JSON (``columns`` holds each
+    column's data type and identifier role); the immutable raw table is stored as
+    a gzipped-CSV blob in ``data``. If those blobs grow, ``data`` can be swapped
+    for an object-storage path behind the same repository method.
+    """
+
+    __tablename__ = "dataset"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(500))
+    source: Mapped[str] = mapped_column(String(20), default="csv")
+    sheet: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sheets: Mapped[list] = mapped_column(JSON, default=list)
+    columns: Mapped[list] = mapped_column(JSON, default=list)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    def __repr__(self) -> str:
+        return f"DatasetRecord(id={self.id!r}, name={self.name!r})"
+
+
 class Model(Base):
     """A fitted PCA/PLS model variant.
 

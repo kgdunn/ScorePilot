@@ -131,6 +131,7 @@ def update_column(
                     other.identifier_role = IdentifierRole.NONE
         meta.identifier_role = update.identifier_role
 
+    store.save(dataset)
     return to_detail(dataset)
 
 

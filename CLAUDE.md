@@ -92,8 +92,12 @@ During development, run uvicorn and the Vite dev server together.
   `PreprocessingSpec` (`core/workset.py`), applied with `apply_spec(df, spec)`.
   One dataset has many specs (one per model variant); a spec serializes into
   `Model.preprocessing` and variants form the `parent_id` lineage. Never bake
-  transforms onto the dataset. Datasets are currently in-memory
-  (`dataset_store.py`) behind an interface a DB table can later implement.
+  transforms onto the dataset. Datasets are persisted in a `dataset` table via
+  `SqlDatasetRepository` (the `Dataset` dataclass in `dataset_store.py` is the
+  in-process working object): queryable metadata and per-column data type /
+  identifier role live in real columns / JSON, and the immutable raw table is a
+  gzipped-CSV blob read back with the round-trip float parser. Swap that blob for
+  an object-storage path behind the same repository method if it grows.
 
 ## Versioning (required on every PR)
 

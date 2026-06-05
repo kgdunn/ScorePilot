@@ -1,18 +1,28 @@
-"""Repository interface over the ORM.
+"""Repository interfaces over the ORM.
 
-A single ``ModelRepository`` protocol abstracts persistence so the rest of the
-app never touches the ORM session directly. The SQLAlchemy implementation works
-unchanged on SQLite and Postgres.
+``ModelRepository`` and ``DatasetRepository`` protocols abstract persistence so
+the rest of the app never touches the ORM session directly. The SQLAlchemy
+implementations work unchanged on SQLite and Postgres.
 """
 
 from __future__ import annotations
 
 from typing import Protocol
+from uuid import uuid4
 
+import pandas as pd
 from sqlalchemy import literal, select
 from sqlalchemy.orm import Session, aliased
 
-from scorepilot.db.models import Model
+from scorepilot.dataset_store import (
+    Dataset,
+    column_from_dict,
+    column_to_dict,
+    deserialize_frame,
+    infer_columns,
+    serialize_frame,
+)
+from scorepilot.db.models import DatasetRecord, Model
 
 
 class ModelRepository(Protocol):
@@ -84,3 +94,105 @@ class SqlModelRepository:
             m.id: m for m in self._session.scalars(select(Model).where(Model.id.in_(ordered_ids)))
         }
         return [by_id[i] for i in ordered_ids]
+
+
+class DatasetRepository(Protocol):
+    """Persistence operations for imported datasets.
+
+    Mirrors the operations callers previously used on the in-memory store, so the
+    API routers are unchanged apart from saving column-metadata edits.
+    """
+
+    def add(
+        self,
+        name: str,
+        frame: pd.DataFrame,
+        *,
+        source: str = "csv",
+        sheets: list[str] | None = None,
+        sheet: str | None = None,
+    ) -> Dataset:
+        """Persist a new dataset from an imported frame and return it."""
+        ...
+
+    def get(self, dataset_id: str) -> Dataset | None:
+        """Return the dataset with ``dataset_id``, or ``None`` if absent."""
+        ...
+
+    def list(self) -> list[Dataset]:
+        """Return all datasets, oldest first."""
+        ...
+
+    def save(self, dataset: Dataset) -> Dataset:
+        """Persist edits to a dataset's column metadata (name, types, roles)."""
+        ...
+
+
+def _to_dataset(
+    record: DatasetRecord,
+    frame: pd.DataFrame | None = None,
+    columns: list | None = None,
+) -> Dataset:
+    """Build a working :class:`Dataset` from a stored record.
+
+    ``frame``/``columns`` may be passed in to avoid re-deserializing right after a
+    write.
+    """
+    return Dataset(
+        id=record.id,
+        name=record.name,
+        raw=frame if frame is not None else deserialize_frame(record.data),
+        columns=columns if columns is not None else [column_from_dict(c) for c in record.columns],
+        source=record.source,
+        sheet=record.sheet,
+        sheets=list(record.sheets),
+    )
+
+
+class SqlDatasetRepository:
+    """SQLAlchemy-backed :class:`DatasetRepository`."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(
+        self,
+        name: str,
+        frame: pd.DataFrame,
+        *,
+        source: str = "csv",
+        sheets: list[str] | None = None,
+        sheet: str | None = None,
+    ) -> Dataset:
+        columns = infer_columns(frame)
+        record = DatasetRecord(
+            id=uuid4().hex,
+            name=name,
+            source=source,
+            sheet=sheet,
+            sheets=list(sheets or []),
+            columns=[column_to_dict(c) for c in columns],
+            data=serialize_frame(frame),
+        )
+        self._session.add(record)
+        self._session.flush()
+        return _to_dataset(record, frame=frame, columns=columns)
+
+    def get(self, dataset_id: str) -> Dataset | None:
+        record = self._session.get(DatasetRecord, dataset_id)
+        return None if record is None else _to_dataset(record)
+
+    def list(self) -> list[Dataset]:
+        records = self._session.scalars(select(DatasetRecord).order_by(DatasetRecord.created_at))
+        return [_to_dataset(r) for r in records]
+
+    def save(self, dataset: Dataset) -> Dataset:
+        record = self._session.get(DatasetRecord, dataset.id)
+        if record is None:
+            msg = f"Unknown dataset_id: {dataset.id}"
+            raise KeyError(msg)
+        # The raw table is immutable; only the name and column metadata can change.
+        record.name = dataset.name
+        record.columns = [column_to_dict(c) for c in dataset.columns]
+        self._session.flush()
+        return dataset
