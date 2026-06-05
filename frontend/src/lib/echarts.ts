@@ -206,10 +206,11 @@ export function vipOption(names: string[], values: number[]): EChartsOption {
 /** Build a sequence (order-of-acquisition) line plot. */
 export function sequenceOption(values: (number | null)[]): EChartsOption {
   return {
-    grid: { left: 48, right: 16, top: 16, bottom: 40 },
+    grid: { left: 52, right: 16, top: 16, bottom: 40 },
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: values.map((_, i) => i + 1), name: 'order' },
-    yAxis: { type: 'value' },
+    // `scale: true` fits the axis tightly to the data instead of forcing it through 0.
+    yAxis: { type: 'value', scale: true },
     series: [
       { type: 'line', data: values, showSymbol: false, lineStyle: { color: '#2b6cb0' } }
     ]
