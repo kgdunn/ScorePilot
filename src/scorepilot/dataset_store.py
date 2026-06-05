@@ -1,18 +1,22 @@
-"""In-memory datasets and their column metadata.
+"""Datasets and their column metadata.
 
 A dataset is the immutable raw table plus intrinsic metadata: each column's data
 type and (optionally) its identifier role. Modelling choices - X/Y, exclusions,
 transforms, scaling - are *not* stored here; they live in a ``PreprocessingSpec``
-per model variant. Datasets currently live in process memory; the same interface
-can later be backed by a database without changing callers.
+per model variant.
+
+The :class:`Dataset` dataclass is the in-process working object. Persistence is
+handled by the repository in ``db`` (a ``dataset`` table) using the serialization
+helpers here: the raw table is stored as gzipped CSV and read back with the
+round-trip float parser so values survive a restart exactly.
 """
 
 from __future__ import annotations
 
+import gzip
 import io
 from dataclasses import dataclass, field
 from typing import cast
-from uuid import uuid4
 
 import pandas as pd
 
@@ -84,7 +88,8 @@ def load_table(
     return frame, "csv", [], None
 
 
-def _infer_columns(frame: pd.DataFrame) -> list[ColumnMeta]:
+def infer_columns(frame: pd.DataFrame) -> list[ColumnMeta]:
+    """Infer column metadata for a freshly imported frame."""
     columns = [
         ColumnMeta(name=str(name), column_type=infer_column_type(series))
         for name, series in frame.items()
@@ -103,35 +108,34 @@ def _assign_default_primary(frame: pd.DataFrame, columns: list[ColumnMeta]) -> N
             return
 
 
-class DatasetStore:
-    """A process-wide registry of imported datasets."""
+def serialize_frame(frame: pd.DataFrame) -> bytes:
+    """Serialize a raw table to a gzipped CSV blob for storage."""
+    return gzip.compress(frame.to_csv(index=False).encode())
 
-    def __init__(self) -> None:
-        self._datasets: dict[str, Dataset] = {}
 
-    def add(
-        self,
-        name: str,
-        frame: pd.DataFrame,
-        *,
-        source: str = "csv",
-        sheets: list[str] | None = None,
-        sheet: str | None = None,
-    ) -> Dataset:
-        dataset = Dataset(
-            id=uuid4().hex,
-            name=name,
-            raw=frame,
-            columns=_infer_columns(frame),
-            source=source,
-            sheet=sheet,
-            sheets=sheets or [],
-        )
-        self._datasets[dataset.id] = dataset
-        return dataset
+def deserialize_frame(blob: bytes) -> pd.DataFrame:
+    """Restore a raw table from a :func:`serialize_frame` blob.
 
-    def get(self, dataset_id: str) -> Dataset | None:
-        return self._datasets.get(dataset_id)
+    ``float_precision="round_trip"`` makes pandas parse floats with a correctly
+    rounded parser, so the values match the originally imported frame exactly.
+    """
+    buffer = io.BytesIO(gzip.decompress(blob))
+    return pd.read_csv(buffer, float_precision="round_trip")
 
-    def list(self) -> list[Dataset]:
-        return list(self._datasets.values())
+
+def column_to_dict(meta: ColumnMeta) -> dict[str, str]:
+    """Serialize column metadata to a JSON-friendly dict."""
+    return {
+        "name": meta.name,
+        "column_type": meta.column_type.value,
+        "identifier_role": meta.identifier_role.value,
+    }
+
+
+def column_from_dict(data: dict[str, str]) -> ColumnMeta:
+    """Restore column metadata from :func:`column_to_dict`."""
+    return ColumnMeta(
+        name=data["name"],
+        column_type=ColumnType(data["column_type"]),
+        identifier_role=IdentifierRole(data["identifier_role"]),
+    )

@@ -368,3 +368,49 @@ def test_spa_fallback_serves_index(client: TestClient) -> None:
     response = client.get("/some/client/route")
     assert response.status_code == 200
     assert "ScorePilot" in response.text
+
+
+def test_datasets_persist_across_restart(tmp_path: Path) -> None:
+    """A dataset (and a model built from it) survives a process restart (#33)."""
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'persist.db'}")
+
+    with TestClient(create_app(settings)) as first:
+        upload = first.post(
+            "/api/datasets", files={"file": ("data.csv", io.BytesIO(_csv_bytes()), "text/csv")}
+        ).json()
+        dataset_id = upload["dataset_id"]
+        model_id = first.post(
+            "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 2}
+        ).json()["summary"]["id"]
+
+    # A brand-new app instance against the same database stands in for a redeploy.
+    with TestClient(create_app(settings)) as second:
+        detail = second.get(f"/api/datasets/{dataset_id}")
+        assert detail.status_code == 200
+        assert detail.json()["n_rows"] == 30
+        # The grid still serves the exact data, so model diagnostics recompute.
+        grid = second.get(f"/api/datasets/{dataset_id}/grid?row_limit=5").json()
+        assert grid["cells"]
+        model = second.get(f"/api/models/{model_id}").json()
+        assert model["diagnostics"] is not None
+
+
+def test_dataset_column_edit_persists(tmp_path: Path) -> None:
+    """Editing a column's role/type is durable across a restart."""
+    settings = Settings(database_url=f"sqlite:///{tmp_path / 'edit.db'}")
+
+    with TestClient(create_app(settings)) as first:
+        dataset_id = first.post(
+            "/api/datasets", files={"file": ("data.csv", io.BytesIO(_csv_bytes()), "text/csv")}
+        ).json()["dataset_id"]
+        patched = first.patch(
+            f"/api/datasets/{dataset_id}/columns/v0", json={"column_type": "qualitative"}
+        )
+        assert patched.status_code == 200
+
+    with TestClient(create_app(settings)) as second:
+        columns = {
+            c["name"]: c["column_type"]
+            for c in second.get(f"/api/datasets/{dataset_id}").json()["columns"]
+        }
+        assert columns["v0"] == "qualitative"
