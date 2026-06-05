@@ -1,14 +1,19 @@
 """Dataset import and metadata endpoints.
 
-Uploaded datasets live in an in-memory store keyed by a generated id. Import keeps
-every column (identifiers and qualitative columns included) and infers each
-column's data type. Roles like X/Y and exclusions are *not* set here - those are
-modelling choices captured in a preprocessing spec.
+Datasets can be imported from an uploaded file or fetched from a URL, and are
+persisted by the dataset repository. Import keeps every column (identifiers and
+qualitative columns included) and infers each column's data type. Roles like X/Y
+and exclusions are *not* set here - those are modelling choices captured in a
+preprocessing spec.
 """
 
 from __future__ import annotations
 
+import urllib.error
+import urllib.request
+from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
@@ -21,10 +26,14 @@ from scorepilot.schemas import (
     ColumnMetaModel,
     ColumnUpdate,
     DatasetDetail,
+    DatasetUrlRequest,
     SampleInfo,
 )
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
+
+# Cap remote imports so a huge URL cannot exhaust memory.
+MAX_URL_BYTES = 5 * 1024 * 1024
 
 
 def to_detail(dataset: Dataset) -> DatasetDetail:
@@ -73,6 +82,70 @@ async def upload_dataset(
         )
 
     dataset = store.add(filename, frame, source=source, sheets=sheets, sheet=used)
+    return to_detail(dataset)
+
+
+def _fetch_url(url: str) -> tuple[bytes, str]:
+    """Fetch a CSV/Excel file from ``url`` (<= 5 MB), returning bytes and filename.
+
+    Only ``http``/``https`` URLs are allowed, and the download is capped so a huge
+    file cannot exhaust memory.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL must start with http:// or https://.",
+        )
+    filename = Path(parsed.path).name or "dataset.csv"
+    request = urllib.request.Request(url, headers={"User-Agent": "ScorePilot"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            declared = response.headers.get("Content-Length")
+            if declared is not None and declared.isdigit() and int(declared) > MAX_URL_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    detail="That file is larger than the 5 MB limit.",
+                )
+            chunks: list[bytes] = []
+            total = 0
+            while chunk := response.read(65536):
+                total += len(chunk)
+                if total > MAX_URL_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail="That file is larger than the 5 MB limit.",
+                    )
+                chunks.append(chunk)
+    except HTTPException:
+        raise
+    except (urllib.error.URLError, ValueError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not fetch the URL: {exc}",
+        ) from exc
+    return b"".join(chunks), filename
+
+
+@router.post("/from-url", response_model=DatasetDetail, status_code=status.HTTP_201_CREATED)
+def open_dataset_from_url(request: DatasetUrlRequest, store: DatasetStoreDep) -> DatasetDetail:
+    """Import a dataset from a CSV/Excel file at a public URL (max 5 MB)."""
+    content, filename = _fetch_url(request.url)
+    try:
+        frame, _source, sheets, used = load_table(content, filename, request.sheet)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not parse file: {exc}",
+        ) from exc
+
+    if frame.shape[1] == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No columns found in the fetched file.",
+        )
+
+    dataset = store.add(filename, frame, source="url", sheets=sheets, sheet=used)
     return to_detail(dataset)
 
 
