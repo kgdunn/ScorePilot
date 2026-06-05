@@ -61,6 +61,25 @@ def test_upload_returns_detail(client: TestClient) -> None:
     assert types["v0"] == "quantitative"
 
 
+def test_upload_autodetects_datetime_and_categorical(client: TestClient) -> None:
+    csv = (
+        b"date,city,sales\n"
+        b"2020-01-15,Paris,100\n"
+        b"2020-02-20,Lyon,110\n"
+        b"2020-03-25,Paris,95\n"
+        b"2021-04-01,Nice,130\n"
+    )
+    response = client.post(
+        "/api/datasets",
+        files={"file": ("dates.csv", io.BytesIO(csv), "text/csv")},
+    )
+    assert response.status_code == 201, response.text
+    types = {c["name"]: c["column_type"] for c in response.json()["columns"]}
+    assert types["date"] == "datetime"
+    assert types["city"] == "qualitative"
+    assert types["sales"] == "quantitative"
+
+
 def test_excel_upload(client: TestClient) -> None:
     buffer = io.BytesIO()
     _frame().to_excel(buffer, index=False)
@@ -181,6 +200,17 @@ def test_variable_inspector(client: TestClient) -> None:
     assert inspector["n"] == 30
     assert sum(inspector["histogram_counts"]) == 30
     assert len(inspector["sequence"]) == 30
+
+
+def test_variable_inspector_scaled(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    scaled = client.get(f"/api/datasets/{dataset_id}/variables/v0?form=scaled").json()
+    # Mean-centered, unit-variance scaling: mean is ~0 and std is ~1.
+    assert abs(scaled["mean"]) < 1e-9
+    assert abs(scaled["std"] - 1.0) < 1e-6
+    # The sequence and histogram still cover every observation.
+    assert len(scaled["sequence"]) == 30
+    assert sum(scaled["histogram_counts"]) == 30
 
 
 def test_variable_inspector_unknown_column_404(client: TestClient) -> None:

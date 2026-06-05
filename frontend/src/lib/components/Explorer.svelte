@@ -16,6 +16,7 @@
   } from '$lib/api';
   import { DataGrid, type CellValue, type GridColumn } from '$lib/grid';
   import { emptyDraft, toApiSpec, toggle, toggleNumber, type DraftSpec } from '$lib/spec';
+  import { showError } from '$lib/toast.svelte';
   import Ribbon from './Ribbon.svelte';
   import VariableInspector from './VariableInspector.svelte';
   import QualityPanel from './QualityPanel.svelte';
@@ -31,7 +32,6 @@
   let draft = $state<DraftSpec>(emptyDraft());
   let selected = $state<string | null>(null);
   let form = $state<'raw' | 'scaled'>('raw');
-  let error = $state<string | null>(null);
   let loading = $state(true);
 
   let fitKind = $state<'PCA' | 'PLS'>('PCA');
@@ -41,13 +41,12 @@
 
   async function loadAll() {
     loading = true;
-    error = null;
     try {
       detail = await getDataset(datasetId);
       grid = await getGridAll(datasetId, form);
       quality = await getQuality(datasetId);
     } catch (e) {
-      error = (e as Error).message;
+      showError((e as Error).message);
     } finally {
       loading = false;
     }
@@ -134,7 +133,7 @@
     try {
       detail = await patchColumn(datasetId, selected, { identifier_role: role });
     } catch (e) {
-      error = (e as Error).message;
+      showError((e as Error).message);
     }
   }
 
@@ -144,7 +143,7 @@
       detail = await patchColumn(datasetId, selected, { column_type: type });
       grid = await getGridAll(datasetId, form);
     } catch (e) {
-      error = (e as Error).message;
+      showError((e as Error).message);
     }
   }
 
@@ -193,7 +192,6 @@
   async function onFit() {
     if (!detail) return;
     fitting = true;
-    error = null;
     try {
       const spec = toApiSpec(draft) as Record<string, unknown>;
       spec.x_columns = effectiveXColumns();
@@ -206,7 +204,7 @@
       });
       await goto(`/models/${result.summary.id}`);
     } catch (e) {
-      error = (e as Error).message;
+      showError((e as Error).message);
     } finally {
       fitting = false;
     }
@@ -214,7 +212,6 @@
 </script>
 
 <div class="explorer" data-testid="explorer">
-  {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="hint">Loading…</p>{/if}
 
   {#if detail}
@@ -272,7 +269,13 @@
 
       <aside class="side">
         {#if selected}
-          <VariableInspector {datasetId} column={selected} onApplyTransform={applyTransform} />
+          <VariableInspector
+            {datasetId}
+            column={selected}
+            {form}
+            appliedTransform={draft.transforms[selected]?.kind ?? 'none'}
+            onApplyTransform={applyTransform}
+          />
         {:else}
           <p class="hint">Select a column to inspect it.</p>
         {/if}
@@ -384,9 +387,6 @@
   .badge {
     font-size: 0.68rem;
     color: #777;
-  }
-  .error {
-    color: #b3261e;
   }
   .hint {
     color: #777;

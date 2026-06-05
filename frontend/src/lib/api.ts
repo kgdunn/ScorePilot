@@ -172,9 +172,13 @@ export async function getGridAll(id: string, form: 'raw' | 'scaled' = 'raw'): Pr
 export async function getVariable(
   id: string,
   column: string,
-  transform: TransformKind = 'none'
+  transform: TransformKind = 'none',
+  form: 'raw' | 'scaled' = 'raw'
 ): Promise<VariableInspector> {
-  const query = transform === 'none' ? '' : `?transform=${transform}`;
+  const params = new URLSearchParams();
+  if (transform !== 'none') params.set('transform', transform);
+  if (form !== 'raw') params.set('form', form);
+  const query = params.toString() ? `?${params}` : '';
   return asJson(
     await fetch(`/api/datasets/${id}/variables/${encodeURIComponent(column)}${query}`)
   );

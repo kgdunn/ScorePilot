@@ -8,17 +8,17 @@
     type DatasetDetail,
     type SampleInfo
   } from '$lib/api';
+  import { showError } from '$lib/toast.svelte';
 
   let datasets = $state<DatasetDetail[]>([]);
   let samples = $state<SampleInfo[]>([]);
   let busy = $state(false);
-  let error = $state<string | null>(null);
 
   async function refresh() {
     try {
       [datasets, samples] = await Promise.all([listDatasets(), listSamples()]);
     } catch (e) {
-      error = (e as Error).message;
+      showError((e as Error).message);
     }
   }
 
@@ -28,12 +28,11 @@
 
   async function onLoadSample(name: string) {
     busy = true;
-    error = null;
     try {
       const dataset = await loadSample(name);
       await goto(`/datasets/${dataset.dataset_id}`);
     } catch (e) {
-      error = (e as Error).message;
+      showError((e as Error).message);
     } finally {
       busy = false;
     }
@@ -44,12 +43,11 @@
     const file = input.files?.[0];
     if (!file) return;
     busy = true;
-    error = null;
     try {
       const dataset = await uploadDataset(file);
       await goto(`/datasets/${dataset.dataset_id}`);
     } catch (e) {
-      error = (e as Error).message;
+      showError((e as Error).message);
     } finally {
       busy = false;
     }
@@ -71,7 +69,6 @@
       disabled={busy}
     />
     {#if busy}<span class="hint">Uploading…</span>{/if}
-    {#if error}<p class="error">{error}</p>{/if}
   </section>
 
   {#if samples.length}
@@ -156,10 +153,6 @@
   .hint {
     color: #777;
     font-size: 0.9rem;
-  }
-  .error {
-    color: #b3261e;
-    font-weight: 600;
   }
   .foot {
     margin-top: 1.5rem;
