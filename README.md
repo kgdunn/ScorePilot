@@ -1,141 +1,118 @@
 # ScorePilot
 
-A web-based tool for **PCA/PLS model analysis** in chemometrics / multivariate
-data analysis. You build up model *variants* by changing preprocessing,
-including or excluding samples, and testing models on new data. The central
-collection of those variants is the **Hangar**; each model carries a **Logbook**
-entry recording its preprocessing, excluded samples, and validation history.
+[![CI](https://github.com/kgdunn/ScorePilot/actions/workflows/ci.yml/badge.svg)](https://github.com/kgdunn/ScorePilot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/)
 
-The numerical core is provided by the
-[`process-improve`](https://github.com/kgdunn/process_improve) library (PCA, PLS,
-Hotelling's T², SPE/DModX, contributions, VIP, cross-validated Q²). ScorePilot
-wraps it behind a FastAPI backend and a SvelteKit + ECharts frontend, shipped as
-a single pip/uvx-installable package.
+**Build, compare, and interrogate PCA and PLS models in your browser.** ScorePilot is
+a point-and-click workbench for multivariate data analysis and chemometrics: load a
+table, clean it up, fit a model, and explore the scores, loadings, and diagnostics
+that explain your process - no code required.
 
-## Architecture at a glance
+It runs as a single, self-contained app you launch with one command. Standard
+chemometrics terms keep their established names throughout: scores (T), loadings (P),
+Hotelling's T², SPE/DModX, contributions, VIP, R²X / R²Y, Q².
 
-- **`core/`** - pure numerical functions over arrays/DataFrames; wraps
-  `process-improve`. No web/DB imports.
-- **`db/`** - SQLAlchemy 2.0 ORM + repository interface (SQLite locally,
-  Postgres in production). Model lineage is a self-referencing `parent_id`
-  traversed with a recursive CTE.
-- **`api/`** - thin FastAPI routers translating HTTP to `core`/`db`.
-- **`frontend/`** - SvelteKit (Svelte 5 runes) + Vite + ECharts, built into
-  `src/scorepilot/web` and served as static files.
+---
 
-The packaged app is **one process**: FastAPI serves `/api` and the built static
-frontend at `/`. No Node is required at runtime.
+## See it in action
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a fuller description,
-including the dataset / preprocessing-spec split and the reusable data grid.
+**Explore your data** - a fast spreadsheet-style grid with a live inspector for every
+column (distribution, sequence, summary, transform preview), data-quality flags, and
+one-click roles and exclusions:
 
-## What you can do today
+![The data explorer: grid, column inspector, and data-quality panel](docs/screenshots/explorer.png)
 
-- **Import** a CSV or Excel file; every column is kept and its data type
-  (quantitative / qualitative / date-time) is inferred.
-- **Explore** the data in a virtualized grid: assign identifier roles
-  (primary / secondary / class), choose X / Y variables, and exclude observations
-  (rows) or variables (columns).
-- **Check data quality**: duplicate primary identifiers, invalid values in
-  quantitative columns, and missing data.
-- **Inspect** any variable: summary statistics, a frequency histogram, a sequence
-  plot, and a non-destructive transform preview, plus a raw vs autoscaled view.
+**Fit a model and read it** - scores with the Hotelling's T² confidence ellipse,
+loadings, T² and SPE with control limits, and VIP, all interactive:
 
-The dataset stays immutable; transforms, scaling, X/Y, and exclusions accumulate in
-a preprocessing recipe that will drive model variants in the next stage. A small
-PCA scores demo lives at `/playground`.
+![Model diagnostics: scores, loadings, T-squared, SPE, and VIP](docs/screenshots/diagnostics.png)
 
-## Run it (local)
+---
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+## What you can do
 
-**Quickest start (newcomers):** install `git`, `make`, `curl`, and Node 20+, then:
+- **Bring in data your way** - upload a CSV or Excel file, paste a public URL, or start
+  from one of the bundled example datasets (LDPE, food consumption, solvents, NIR tablet
+  spectra, and more).
+- **Understand each variable** - click any column to see its histogram, run-order
+  sequence, and summary statistics, and preview a transform (log, logit, ...) before you
+  commit to it. Toggle the whole grid between raw and autoscaled values.
+- **Clean and shape the workset** - set the primary identifier (auto-detected, with a
+  synthetic row id when needed), mark X / Y variables, and exclude outlying samples or
+  unwanted variables - all without altering your original data.
+- **Catch problems early** - duplicate identifiers, non-numeric values in numeric
+  columns, and missing data are flagged as you go.
+- **Fit PCA and PLS** - choose the number of components and fit. For one-component models
+  the plots collapse to a single, readable axis automatically.
+- **Interrogate the model** - plot any pair of components (or sequence order), hover a
+  score to read its SPE and T², and double-click or long-press any point to open its
+  **contribution plot** and see which variables drive it.
+- **Keep a history** - every model variant lands in the **Hangar**, and each one carries
+  a **Logbook** recording its preprocessing, exclusions, and lineage, so you can branch a
+  new variant from an existing one and compare.
+
+Your datasets and models are saved, so they survive a restart and are there when you
+come back.
+
+---
+
+## Quick start
+
+You need Python 3.12+ and [uv](https://docs.astral.sh/uv/). Then:
 
 ```bash
-make setupenv   # one-time: installs uv, Python deps, and frontend deps
-make debug      # builds the UI and runs the server at http://127.0.0.1:8000
+uv run scorepilot
 ```
 
-`make help` lists every task. For a from-scratch, zero-experience walkthrough
-(including installing the tools) see [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+That boots the app and opens your browser at `http://127.0.0.1:8000`. Load a sample
+dataset from the home page and start exploring.
 
-### Without make
-
-```bash
-uv sync                 # create the environment
-uv run scorepilot       # boot uvicorn and open the browser
-```
-
-`uv run scorepilot` serves the bundled frontend (a placeholder until you build
-the real one - see below) and the API at `http://127.0.0.1:8000`. API docs are
-at `http://127.0.0.1:8000/api/docs`.
-
-Useful flags:
+Handy flags:
 
 ```bash
 uv run scorepilot --host 0.0.0.0 --port 8080 --no-browser
 ```
 
-## Develop
+> The packaged app is a single process with no Node required at runtime: the Python
+> server hosts both the API and the web UI.
 
-Run the backend and the Vite dev server side by side. The Vite server proxies
-`/api` to uvicorn, so the frontend gets hot-reload while talking to the real API.
+---
 
-```bash
-# terminal A - backend (auto-reload)
-uv run uvicorn scorepilot.app:create_app --factory --reload
+## The assistant (optional)
 
-# terminal B - frontend dev server
-cd frontend
-npm install
-npm run dev
-```
+ScorePilot has an optional in-app assistant, **T²-D2**, for help interpreting a model.
+It is **off by default**, bring-your-own-key, and the analysis never depends on it - the
+tool is fully usable without it.
 
-Open the URL printed by Vite (default `http://localhost:5173`).
+---
 
-### Build the frontend into the package
+## For developers
 
-The compiled bundle is **not** committed; it is built into `src/scorepilot/web`
-and force-included into the wheel at release time:
+ScorePilot is a FastAPI + SQLAlchemy backend with a SvelteKit (Svelte 5) + ECharts
+frontend, wrapping the [`process-improve`](https://github.com/kgdunn/process_improve)
+chemometrics library for the numerics. The numerical `core/` is pure and has no web or
+database imports.
 
-```bash
-cd frontend
-npm run build           # outputs to ../src/scorepilot/web
-```
+- Architecture, the dataset / preprocessing-spec model, and the reusable data grid:
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- A from-scratch local setup walkthrough: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
+- Deployment and publishing: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md),
+  [`docs/PUBLISHING.md`](docs/PUBLISHING.md)
 
-After building, `uv run scorepilot` serves the real UI.
-
-## Quality gates
+Common tasks:
 
 ```bash
-uv run ruff check .     # lint
-uv run ruff format .    # format
-uv run pyright          # type check
+uv sync                 # set up the environment
+uv run scorepilot       # run the app
 uv run pytest           # tests
+uv run ruff check .     # lint
+uv run pyright          # type check
+
+cd frontend && npm install && npm run dev   # frontend dev server (proxies /api)
 ```
 
-Install the git hooks once with `uv run pre-commit install`.
-
-## Database / migrations
-
-SQLite is used locally (default `sqlite:///./scorepilot.db`); set
-`SCOREPILOT_DATABASE_URL` to point at Postgres in production.
-
-```bash
-uv run alembic upgrade head                         # apply migrations
-uv run alembic revision --autogenerate -m "message" # create a new migration
-```
-
-## Deployment
-
-Pushes to `main` build a container image and auto-deploy it to a Hetzner server
-(Caddy for HTTPS, Postgres for storage), so you can test the latest build from any
-browser. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for server setup, the
-GitHub secrets to configure, and how to build/run the image locally
-(`make image` / `make image-run`).
-
-Merges to `main` can also publish a wheel to PyPI (off until enabled). See
-[`docs/PUBLISHING.md`](docs/PUBLISHING.md).
+---
 
 ## License
 
