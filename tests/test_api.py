@@ -414,3 +414,64 @@ def test_dataset_column_edit_persists(tmp_path: Path) -> None:
             for c in second.get(f"/api/datasets/{dataset_id}").json()["columns"]
         }
         assert columns["v0"] == "qualitative"
+
+
+def _upload(client: TestClient, csv: bytes) -> dict:
+    response = client.post(
+        "/api/datasets", files={"file": ("data.csv", io.BytesIO(csv), "text/csv")}
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_synthetic_primary_id_when_no_unique_column(client: TestClient) -> None:
+    """All-numeric data with no usable identifier gets a synthetic Row column."""
+    csv = b"a,b\n0.1,1.1\n0.2,1.2\n0.3,1.3\n"
+    body = _upload(client, csv)
+    assert body["primary_id"] == "Row"
+    # The synthetic identifier is added as the leftmost column.
+    assert [c["name"] for c in body["columns"]] == ["Row", "a", "b"]
+
+    # ...but it is not a model variable: PCA still fits on the two real columns.
+    fit = client.post(
+        "/api/models/pca", json={"dataset_id": body["dataset_id"], "n_components": 2}
+    ).json()
+    assert fit["scores"]["data"] and len(fit["component_names"]) == 2
+    # The grid shows the Row column with values 1, 2, 3.
+    grid = client.get(f"/api/datasets/{body['dataset_id']}/grid?row_limit=3").json()
+    assert grid["column_names"][0] == "Row"
+    assert [row[0] for row in grid["cells"]] == ["1", "2", "3"]
+
+
+def test_integer_column_auto_detected_as_primary(client: TestClient) -> None:
+    csv = b"id,x\n10,0.1\n20,0.2\n30,0.3\n"
+    body = _upload(client, csv)
+    assert body["primary_id"] == "id"
+
+
+def test_set_primary_requires_unique_values(client: TestClient) -> None:
+    # 'grp' repeats; 'val' is the auto-detected primary.
+    body = _upload(client, b"grp,val\nA,1\nA,2\nB,3\n")
+    dataset_id = body["dataset_id"]
+    assert body["primary_id"] == "val"
+
+    rejected = client.patch(
+        f"/api/datasets/{dataset_id}/columns/grp", json={"identifier_role": "primary"}
+    )
+    assert rejected.status_code == 422
+    assert "unique" in rejected.json()["detail"]
+
+
+def test_set_primary_relinquishes_previous(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]  # primary auto-detected as 'sample'
+    # v0 is complete and unique, so it can become the new primary.
+    updated = client.patch(
+        f"/api/datasets/{dataset_id}/columns/v0", json={"identifier_role": "primary"}
+    )
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["primary_id"] == "v0"
+    roles = {c["name"]: c["identifier_role"] for c in body["columns"]}
+    # The previous primary is relinquished back to a regular column.
+    assert roles["sample"] == "none"
+    assert roles["v0"] == "primary"

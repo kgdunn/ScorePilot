@@ -19,7 +19,7 @@ from scorepilot.dataset_store import (
     column_from_dict,
     column_to_dict,
     deserialize_frame,
-    infer_columns,
+    prepare_dataset,
     serialize_frame,
 )
 from scorepilot.db.models import DatasetRecord, Model
@@ -164,7 +164,9 @@ class SqlDatasetRepository:
         sheets: list[str] | None = None,
         sheet: str | None = None,
     ) -> Dataset:
-        columns = infer_columns(frame)
+        # prepare_dataset may add a synthetic identifier column, so persist the
+        # frame it returns (not the original).
+        prepared, columns = prepare_dataset(frame)
         record = DatasetRecord(
             id=uuid4().hex,
             name=name,
@@ -172,11 +174,11 @@ class SqlDatasetRepository:
             sheet=sheet,
             sheets=list(sheets or []),
             columns=[column_to_dict(c) for c in columns],
-            data=serialize_frame(frame),
+            data=serialize_frame(prepared),
         )
         self._session.add(record)
         self._session.flush()
-        return _to_dataset(record, frame=frame, columns=columns)
+        return _to_dataset(record, frame=prepared, columns=columns)
 
     def get(self, dataset_id: str) -> Dataset | None:
         record = self._session.get(DatasetRecord, dataset_id)

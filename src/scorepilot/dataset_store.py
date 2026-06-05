@@ -18,9 +18,14 @@ import io
 from dataclasses import dataclass, field
 from typing import cast
 
+import numpy as np
 import pandas as pd
 
 from scorepilot.core import ColumnType, IdentifierRole, infer_column_type
+from scorepilot.core._pandas import column as get_column
+from scorepilot.core._pandas import to_numeric
+
+SYNTHETIC_ID_NAME = "Row"
 
 
 @dataclass
@@ -67,7 +72,13 @@ class Dataset:
         return {c.name: c.column_type for c in self.columns}
 
     def quantitative_columns(self) -> list[str]:
-        return [c.name for c in self.columns if c.column_type is ColumnType.QUANTITATIVE]
+        # Identifier / class columns are intrinsic metadata, not model variables,
+        # so they are excluded from the default X block even if numeric.
+        return [
+            c.name
+            for c in self.columns
+            if c.column_type is ColumnType.QUANTITATIVE and c.identifier_role is IdentifierRole.NONE
+        ]
 
 
 def load_table(
@@ -89,23 +100,71 @@ def load_table(
 
 
 def infer_columns(frame: pd.DataFrame) -> list[ColumnMeta]:
-    """Infer column metadata for a freshly imported frame."""
-    columns = [
+    """Infer each column's data type (no identifier roles assigned)."""
+    return [
         ColumnMeta(name=str(name), column_type=infer_column_type(series))
         for name, series in frame.items()
     ]
-    _assign_default_primary(frame, columns)
-    return columns
 
 
-def _assign_default_primary(frame: pd.DataFrame, columns: list[ColumnMeta]) -> None:
-    """Mark the first fully-unique label-like column as the primary identifier."""
+def is_valid_primary(series: pd.Series) -> bool:
+    """Whether a column can serve as a primary identifier: complete and unique."""
+    return bool(series.notna().all()) and bool(series.is_unique)
+
+
+def _is_primary_candidate(series: pd.Series, column_type: ColumnType) -> bool:
+    """Whether a column is a plausible auto-detected primary identifier.
+
+    Label-like columns (qualitative/datetime/unknown) qualify when complete and
+    unique. Numeric columns qualify only when integer-valued: unique floats are
+    almost always measurements, not identifiers.
+    """
+    if not is_valid_primary(series):
+        return False
+    if column_type is not ColumnType.QUANTITATIVE:
+        return True
+    numeric = to_numeric(series).to_numpy(dtype=float)
+    return bool(np.isfinite(numeric).all()) and bool(np.all(numeric == np.round(numeric)))
+
+
+def _unique_name(base: str, existing: pd.Index) -> str:
+    """Return ``base``, or ``base_1``/``base_2``/... if it clashes with a column."""
+    taken = {str(name) for name in existing}
+    if base not in taken:
+        return base
+    index = 1
+    while f"{base}_{index}" in taken:
+        index += 1
+    return f"{base}_{index}"
+
+
+def prepare_dataset(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[ColumnMeta]]:
+    """Infer column metadata and pick (or synthesize) a primary identifier.
+
+    The primary identifier is the leftmost complete, unique, label-like or
+    integer column. If no column qualifies, a synthetic ``Row`` column (1, 2, 3,
+    ...) is inserted as the leftmost column and used as the primary identifier, so
+    every dataset has a stable identifier. Returns the (possibly augmented) frame
+    alongside its column metadata.
+    """
+    columns = infer_columns(frame)
     for meta in columns:
-        series = cast("pd.Series", frame[meta.name])
-        is_label = meta.column_type in (ColumnType.QUALITATIVE, ColumnType.DATETIME)
-        if is_label and bool(series.notna().all()) and bool(series.is_unique):
+        if _is_primary_candidate(get_column(frame, meta.name), meta.column_type):
             meta.identifier_role = IdentifierRole.PRIMARY
-            return
+            return frame, columns
+
+    name = _unique_name(SYNTHETIC_ID_NAME, frame.columns)
+    augmented = frame.copy()
+    augmented.insert(0, name, range(1, len(augmented) + 1))
+    columns.insert(
+        0,
+        ColumnMeta(
+            name=name,
+            column_type=ColumnType.QUALITATIVE,
+            identifier_role=IdentifierRole.PRIMARY,
+        ),
+    )
+    return augmented, columns
 
 
 def serialize_frame(frame: pd.DataFrame) -> bytes:

@@ -14,7 +14,8 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from scorepilot.api.deps import DatasetStoreDep
 from scorepilot.core import IdentifierRole
-from scorepilot.dataset_store import Dataset, load_table
+from scorepilot.core._pandas import column as get_column
+from scorepilot.dataset_store import Dataset, is_valid_primary, load_table
 from scorepilot.samples import SAMPLES, get_sample, load_sample_frame
 from scorepilot.schemas import (
     ColumnMetaModel,
@@ -126,6 +127,19 @@ def update_column(
         meta.column_type = update.column_type
     if update.identifier_role is not None:
         if update.identifier_role is IdentifierRole.PRIMARY:
+            series = get_column(dataset.raw, column)
+            if not is_valid_primary(series):
+                n_missing = int(series.isna().sum())
+                n_duplicate = int(series.duplicated().sum())
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        f"Column '{column}' cannot be the primary identifier: it must have "
+                        f"unique, non-missing values ({n_missing} missing, "
+                        f"{n_duplicate} duplicate)."
+                    ),
+                )
+            # Relinquish the previous primary: there can be only one.
             for other in dataset.columns:
                 if other.identifier_role is IdentifierRole.PRIMARY:
                     other.identifier_role = IdentifierRole.NONE
