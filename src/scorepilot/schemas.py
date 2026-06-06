@@ -314,6 +314,12 @@ class FitModelRequest(ApiModel):
     spec: PreprocessingSpecModel | None = None
 
 
+class UpdateModelRequest(ApiModel):
+    """Patch a model's tunable hyperparameters in place (no refit-from-scratch)."""
+
+    n_components: int = Field(ge=1)
+
+
 class VariantRequest(ApiModel):
     """Create a child model variant from a brushed selection.
 

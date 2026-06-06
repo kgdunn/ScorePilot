@@ -32,6 +32,10 @@ class ModelRepository(Protocol):
         """Persist a new model and return it (with its assigned ``id``)."""
         ...
 
+    def update(self, model: Model) -> Model:
+        """Persist changes to an already-tracked model and return it."""
+        ...
+
     def get(self, model_id: int) -> Model | None:
         """Return the model with ``model_id``, or ``None`` if absent."""
         ...
@@ -53,6 +57,12 @@ class SqlModelRepository:
 
     def add(self, model: Model) -> Model:
         self._session.add(model)
+        self._session.flush()
+        return model
+
+    def update(self, model: Model) -> Model:
+        # ``model`` is already attached to the session; flush the mutation so it
+        # is persisted when the request's transaction commits.
         self._session.flush()
         return model
 
