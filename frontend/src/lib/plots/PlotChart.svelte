@@ -149,7 +149,15 @@
 <div class="chart" bind:this={el} style="height:{height};"></div>
 
 <style>
+  /* `position: relative; z-index: 0` makes each chart its own stacking context.
+   * ECharts injects its tooltip into this container with an inline
+   * `z-index: 9999999`; without a local stacking context that tooltip escapes
+   * into the page root and paints over modals (issue #58). Confining it here
+   * keeps a background plot's tooltip below any modal, while in-modal charts
+   * still show their tooltip above their own canvas. */
   .chart {
     width: 100%;
+    position: relative;
+    z-index: 0;
   }
 </style>

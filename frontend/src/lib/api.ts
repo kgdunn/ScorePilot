@@ -356,3 +356,9 @@ export interface CrossValidation {
 export async function getCrossValidation(modelId: number): Promise<CrossValidation> {
   return asJson(await fetch(`/api/models/${modelId}/cross-validation`));
 }
+
+/** The running backend version, shown in the UI so you can confirm the deploy. */
+export async function getVersion(): Promise<string> {
+  const body = await asJson<{ version: string }>(await fetch('/api/version'));
+  return body.version;
+}

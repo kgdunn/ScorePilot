@@ -50,6 +50,14 @@ def test_health(client: TestClient) -> None:
     assert client.get("/api/health").json() == {"status": "ok"}
 
 
+def test_version(client: TestClient) -> None:
+    from scorepilot import __version__
+
+    body = client.get("/api/version").json()
+    assert body == {"version": __version__}
+    assert isinstance(body["version"], str) and body["version"]
+
+
 def test_upload_returns_detail(client: TestClient) -> None:
     body = _upload_csv(client)
     assert body["n_rows"] == 30
