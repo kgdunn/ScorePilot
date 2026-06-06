@@ -13,9 +13,10 @@ for PCA, minimum RMSECV for PLS).
 The cross-validation itself - fold splitting, PRESS, and the validated R2 - is
 delegated to ``process_improve``'s ``PCA.select_n_components`` /
 ``PLS.select_n_components`` rather than reimplemented here; we only adapt their
-output into one small, serialization-friendly result and (for PCA, whose selector
-exposes PRESS but not a validated R2 directly) normalise PRESS by the same total
-sum-of-squares the calibration R2 uses, so R2 and Q2 are directly comparable.
+output into one small, serialization-friendly result. Both selectors report the
+cross-validated R2 (Q2) directly - PCA via its ``q2`` field, PLS via the
+``"total"`` column of ``r2y_validated`` - normalised the same way as the
+calibration R2, so R2 and Q2 are directly comparable.
 
 Like those selectors, this expects ``x_block`` (and ``y_block`` for PLS) to be the
 already-centered/scaled output of :func:`apply_spec`, and refits on each fold
@@ -30,6 +31,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from process_improve.multivariate import PCA, PLS
+from process_improve.multivariate.methods import NotEnoughVarianceError
 from sklearn.model_selection import KFold
 
 from scorepilot.core.modeling import ModelKind
@@ -104,7 +106,10 @@ def cross_validate(
         else:
             r2, q2, recommended = _pca_curves(x_block, max_components, folds)
             target = "X"
-    except (RuntimeError, FloatingPointError) as exc:  # selector could not converge
+    except NotEnoughVarianceError as exc:  # more components than the data's rank supports
+        msg = f"Too many components for the data available to cross-validate: {exc}"
+        raise ValueError(msg) from exc
+    except (RuntimeError, FloatingPointError) as exc:  # selector could not converge otherwise
         raise ValueError(str(exc)) from exc
 
     return CrossValidation(
@@ -125,20 +130,18 @@ def _pca_curves(
 ) -> tuple[list[float], list[float], int]:
     """R2X, Q2X, and recommendation for PCA via ``PCA.select_n_components``.
 
-    The selector exposes PRESS (mean squared cross-validated reconstruction error
-    per cell) but not a validated R2. Dividing PRESS by the null-model error -
-    the mean squared value of the centered block - yields ``Q2 = 1 - PRESS / SS``,
-    the same normalisation the calibration ``r2_cumulative_`` uses, so the two
-    curves are directly comparable.
+    The selector reports the cross-validated R2X (Q2) per component directly in
+    its ``q2`` field - PRESS normalised by the same null-model sum-of-squares the
+    calibration ``r2_cumulative_`` uses - so R2 and Q2 are directly comparable.
+    ``q2`` is NaN only when the block has no variance to cross-validate.
     """
-    selection = PCA.select_n_components(x_block, max_components=max_components, cv=folds)  # type: ignore[arg-type]
-    press = np.asarray(selection.press.to_numpy(), dtype=float)
-    a_max = len(press)
-    baseline = float(np.nanmean(np.asarray(x_block.to_numpy(), dtype=float) ** 2))
-    if baseline <= 0:
+    selection = PCA.select_n_components(x_block, max_components=max_components, cv=folds)
+    q2_values = np.asarray(selection.q2.to_numpy(), dtype=float)
+    if not np.all(np.isfinite(q2_values)):
         msg = "The X block has no variance to cross-validate."
         raise ValueError(msg)
-    q2 = [float(1.0 - p / baseline) for p in press]
+    q2 = [float(v) for v in q2_values]
+    a_max = len(q2)
     r2 = [float(v) for v in np.asarray(PCA(n_components=a_max).fit(x_block).r2_cumulative_)[:a_max]]
     return r2, q2, int(selection.n_components)
 
@@ -152,7 +155,7 @@ def _pls_curves(
     column of ``r2y_validated``); the calibration R2Y is the fitted model's
     ``r2_cumulative_``.
     """
-    selection = PLS.select_n_components(x_block, y_block, max_components=max_components, cv=folds)  # type: ignore[arg-type]
+    selection = PLS.select_n_components(x_block, y_block, max_components=max_components, cv=folds)
     q2 = [float(v) for v in selection.r2y_validated["total"].to_numpy()]
     a_max = len(q2)
     model = PLS(n_components=a_max, scale=False).fit(x_block, y_block)

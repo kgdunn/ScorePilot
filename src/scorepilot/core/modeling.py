@@ -208,23 +208,13 @@ def observation_contributions(
         raise ValueError(msg)
 
     model = _fit_estimator(x_block, y_block, kind, n_components)
-    loadings = model.loadings_ if kind == "PCA" else model.x_loadings_
-    directions = model.loadings_ if kind == "PCA" else model.direct_weights_
-    p_mat = np.asarray(loadings, dtype=float)  # K x A (reconstruction)
-    r_mat = np.asarray(directions, dtype=float)  # K x A, scores T = X @ R
-    scores = np.asarray(model.scores_, dtype=float)  # n x A
-
-    score_var = scores.var(axis=0, ddof=1)
-    score_var = np.where(score_var > 0, score_var, 1.0)
-
-    x_i = np.asarray(x_block.to_numpy(), dtype=float)[observation]  # K
-    t_i = scores[observation]  # A
-
-    # T2 contribution of variable k: sum_a (t_a / s_a^2) * R[k, a] * x_k. Summed
-    # over k this telescopes to sum_a t_a^2 / s_a^2 = the observation's T2.
-    t2_contrib = (r_mat @ (t_i / score_var)) * x_i
-    # SPE residual of variable k: x_k minus its reconstruction; squares sum to SPE.
-    spe_contrib = x_i - (p_mat @ t_i)
+    # Delegate the per-variable T2 / SPE decomposition to process_improve so the
+    # MSPC math lives in one place (process_improve >= 1.27.0). Each call returns
+    # an (n_observations x n_variables) frame; we pick out the requested row. The
+    # T2 contributions sum to the observation's T2; the SPE contributions are its
+    # signed residuals whose squares sum to its SPE.
+    t2_row = model.t2_contributions(x_block).iloc[observation]
+    spe_row = model.spe_contributions(x_block).iloc[observation]
 
     return Contributions(
         observation=observation,
@@ -232,6 +222,6 @@ def observation_contributions(
             observation_name if observation_name is not None else str(x_block.index[observation])
         ),
         variable_names=[str(c) for c in x_block.columns.astype(str)],
-        t2=[float(v) for v in t2_contrib],
-        spe=[float(v) for v in spe_contrib],
+        t2=[float(v) for v in t2_row],
+        spe=[float(v) for v in spe_row],
     )
