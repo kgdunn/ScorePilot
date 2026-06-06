@@ -111,6 +111,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/version", tags=["meta"])
+    def version() -> dict[str, str]:
+        """The running app version, surfaced in the web UI to confirm the deploy."""
+        return {"version": __version__}
+
     app.include_router(datasets.router, prefix="/api")
     app.include_router(exploration.router, prefix="/api")
     app.include_router(models.router, prefix="/api")
