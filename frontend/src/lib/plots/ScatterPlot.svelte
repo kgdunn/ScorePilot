@@ -77,6 +77,21 @@
     }
   }
 
+  function isPointSelected(p: PlotPoint): boolean {
+    if (!link) return false;
+    const onCol = linkBy === 'col' || (linkBy === 'both' && p.rowId == null);
+    const key = onCol ? p.colId : p.rowId;
+    return key != null && (onCol ? link.hasCol(key) : link.hasRow(key));
+  }
+
+  // Clear the dimension this plot links on (issue #70).
+  function clearLinkedDim(): void {
+    if (!link) return;
+    if (linkBy === 'col') link.clearCols();
+    else if (linkBy === 'row') link.clearRows();
+    else link.reset();
+  }
+
   // The most recent enclosed points while a lasso is being drawn. ECharts
   // auto-closes the polygon (last vertex -> first), so even a partial ring is a
   // closed shape - forgiving on touch, where you can never trace exactly back to
@@ -85,11 +100,19 @@
 
   function onReady(c: ECharts): void {
     chart = c;
-    // Arrow mode: single click toggles a point's membership.
+    // Click a point: in arrow mode toggle it; in any mode, clicking an
+    // already-selected point toggles it off - so a selection can be fine-tuned
+    // without switching modes (issue #70).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     c.on('click', (p: any) => {
-      if (mode !== 'arrow' || p?.componentType !== 'series' || p.seriesIndex !== 0) return;
-      if (p.dataIndex != null) selectIndices([p.dataIndex], true);
+      if (p?.componentType !== 'series' || p.seriesIndex !== 0 || p.dataIndex == null) return;
+      const pt = points[p.dataIndex];
+      if (pt && (mode === 'arrow' || isPointSelected(pt))) selectIndices([p.dataIndex], true);
+    });
+    // Double-click / tap on empty plot area clears this plot's selection (#70).
+    // A double-click on a point has a target and instead opens its drill-down.
+    c.getZr().on('dblclick', (e: { target?: unknown }) => {
+      if (!e.target) clearLinkedDim();
     });
     // Track the enclosed points as the lasso is drawn. ECharts emits this on
     // every move (it does not emit a final one on mouse-up), so the last value
