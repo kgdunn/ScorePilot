@@ -40,12 +40,12 @@
   const step = (delta: number) => (components = clamp(components + delta));
 </script>
 
-<div class="explorer">
+<div class="explorer" data-testid="component-explorer">
   <div class="count">
     <span class="label">Components</span>
     <div class="stepper">
       <button type="button" aria-label="Remove a component" disabled={components <= min} onclick={() => step(-1)}>−</button>
-      <span class="value" class:busy={saving}>{components}</span>
+      <span class="value" data-testid="component-count" class:busy={saving}>{components}</span>
       <button type="button" aria-label="Add a component" disabled={components >= max} onclick={() => step(1)}>+</button>
     </div>
     <input
