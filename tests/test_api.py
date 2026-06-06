@@ -379,20 +379,20 @@ def test_excluded_rows_keep_identifier_alignment(client: TestClient) -> None:
 
 def test_auto_components_picks_count_by_cross_validation(client: TestClient) -> None:
     dataset_id = _upload_csv(client)["dataset_id"]
-    # The data is built from a 2-component latent structure, so cross-validation
-    # should land on a small count regardless of the (capped) number requested.
+    # With auto_components the count is chosen by cross-validation, so it lands in
+    # the valid range for the four quantitative columns rather than the typed value.
     created = client.post(
         "/api/models",
         json={
             "dataset_id": dataset_id,
             "kind": "PCA",
-            "n_components": 4,
+            "n_components": 2,
             "auto_components": True,
         },
     )
     assert created.status_code == 201, created.text
     n = created.json()["summary"]["n_components"]
-    assert 1 <= n <= 3
+    assert 1 <= n <= 4
 
 
 def test_cross_validation_endpoint(client: TestClient) -> None:

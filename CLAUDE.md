@@ -26,6 +26,12 @@ testing models on new data.
   T², SPE/DModX, contributions, VIP, cross-validated Q². Pure functions over
   arrays / DataFrames. **No FastAPI, SQLAlchemy, or any web/DB imports here.**
   This boundary is load-bearing — keep it clean and independently testable.
+  **Never reimplement the chemometrics / multivariate math** (model fitting,
+  cross-validation, PRESS, Q², component selection, control limits, VIP,
+  contributions): use `process_improve` and adapt its output. If `process_improve`
+  is missing a piece, write the thinnest possible adapter, flag it explicitly, and
+  prefer contributing the real implementation **upstream** to `process_improve`
+  rather than growing a bespoke version here.
 - **`db/`** — SQLAlchemy 2.0 ORM + a repository interface. SQLite locally,
   Postgres in production, same interface for both.
 - **`api/`** — FastAPI routers. Thin layer translating HTTP ↔ core/db.
