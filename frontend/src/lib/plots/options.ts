@@ -219,6 +219,7 @@ export function scatterOption(cfg: ScatterConfig): EChartsOption {
           ? {
               silent: true,
               symbol: 'none',
+              animation: false,
               lineStyle: { type: 'dashed', color: '#bbb' },
               data: [{ xAxis: 0 }, { yAxis: 0 }]
             }
@@ -274,6 +275,9 @@ function limitMarkLine(limits: LimitLine[]) {
   return {
     silent: true,
     symbol: 'none',
+    // Never animate the limit line: it re-renders on every component-count
+    // change, and a sweeping/redrawing red line there is distracting.
+    animation: false,
     data: limits.map((l) => ({
       yAxis: l.value,
       lineStyle: { color: l.color ?? SELECT_BORDER, type: l.dashed ? ('dashed' as const) : ('solid' as const) },
@@ -425,7 +429,10 @@ export function lineOption(cfg: LineConfig): EChartsOption {
       symbolSize: 7,
       lineStyle: { color: s.color ?? palette[si % palette.length] },
       itemStyle: { color: s.color ?? palette[si % palette.length] },
-      markLine: si === 0 && markLineData.length ? { silent: true, symbol: 'none', data: markLineData } : undefined
+      markLine:
+        si === 0 && markLineData.length
+          ? { silent: true, symbol: 'none', animation: false, data: markLineData }
+          : undefined
     }))
   };
 }

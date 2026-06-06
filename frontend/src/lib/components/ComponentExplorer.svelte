@@ -32,6 +32,11 @@
   const pct = (v: number | undefined): string =>
     v == null ? '–' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
 
+  // Cumulative totals at the current count (shown prominently up top).
+  const totalR2 = $derived(cv?.r2[components - 1]);
+  const totalQ2 = $derived(cv?.q2[components - 1]);
+  const fmtPct = (v: number | undefined): string => (v == null ? '–' : `${(v * 100).toFixed(1)}%`);
+
   // Marginal gain of the current component, and of the one that would come next.
   const thisR2 = $derived(cv?.r2_per_component[components - 1]);
   const thisQ2 = $derived(cv?.q2_per_component[components - 1]);
@@ -62,6 +67,13 @@
       aria-label="Number of components"
     />
   </div>
+
+  {#if cv}
+    <div class="totals" title="Cumulative fit (R²) and cross-validated prediction (Q²) at this count">
+      <span class="stat r2"><span class="k">R²</span> {fmtPct(totalR2)}</span>
+      <span class="stat q2"><span class="k">Q²</span> {fmtPct(totalQ2)}</span>
+    </div>
+  {/if}
 
   <div class="actions">
     {#if recommended}
@@ -172,6 +184,28 @@
     flex: 1;
     min-width: 110px;
     accent-color: #2b6cb0;
+  }
+  .totals {
+    display: flex;
+    align-items: baseline;
+    gap: 0.9rem;
+  }
+  .stat {
+    font-size: 1.05rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .k {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #8a93a0;
+    margin-right: 0.15rem;
+  }
+  .stat.r2 {
+    color: #2b6cb0;
+  }
+  .stat.q2 {
+    color: #2f855a;
   }
   .actions {
     display: flex;
