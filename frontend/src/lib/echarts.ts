@@ -23,14 +23,16 @@ export function fmtNum(value: number | null | undefined, sig = 5): string {
   return n.toExponential(sig - 1);
 }
 
-/** Inside (scroll-wheel) zoom on both axes, plus drag-to-pan. Spread into every
- * plot so the scroll wheel always zooms, anywhere. A fresh array per call avoids
- * sharing a mutable option object between charts. */
+/** Inside zoom on both axes, plus drag-to-pan. Wheel zoom is handled manually in
+ * `Chart.svelte` (see {@link zoomedWindow}) because ECharts' built-in wheel zoom
+ * steps far too aggressively (up to 1.4x per notch) with no sensitivity knob, so
+ * `zoomOnMouseWheel` stays off here. A fresh array per call avoids sharing a
+ * mutable option object between charts. */
 function wheelZoom() {
   const common = {
     type: 'inside' as const,
     filterMode: 'none' as const,
-    zoomOnMouseWheel: true,
+    zoomOnMouseWheel: false,
     moveOnMouseMove: true,
     moveOnMouseWheel: false
   };
@@ -38,6 +40,26 @@ function wheelZoom() {
     { ...common, xAxisIndex: 0 },
     { ...common, yAxisIndex: 0 }
   ];
+}
+
+/** Per-notch wheel zoom factor for the manual handler: <1 zooms in. ~0.9 gives a
+ * gentle ~10% step, a fraction of ECharts' built-in 1.2-1.4x. */
+export const ZOOM_STEP = 0.9;
+
+/** The new ``[min, max]`` axis window after a wheel zoom centred on ``cursor``.
+ * ``factor`` < 1 zooms in (shrinks the window), > 1 zooms out; the data point
+ * under the cursor stays fixed so zooming tracks the pointer. */
+export function zoomedWindow(
+  viewMin: number,
+  viewMax: number,
+  cursor: number,
+  factor: number
+): [number, number] {
+  const width = viewMax - viewMin;
+  if (!(width > 0)) return [viewMin, viewMax];
+  const fraction = (cursor - viewMin) / width;
+  const newWidth = width * factor;
+  return [cursor - fraction * newWidth, cursor + (1 - fraction) * newWidth];
 }
 
 /** Split a long label across (at most) two lines at a natural break near the
@@ -97,6 +119,8 @@ export function scoresScatterOption(
         type: 'scatter',
         symbolSize: 11,
         data: points,
+        label: scorePointLabel,
+        labelLayout: { hideOverlap: true, moveOverlap: 'shiftY' },
         markLine: {
           silent: true,
           symbol: 'none',
@@ -107,6 +131,17 @@ export function scoresScatterOption(
     ]
   };
 }
+
+/** Shared label config for scores points: show each observation's identifier
+ * (the 3rd data field) beside its point, horizontal, overlaps hidden. */
+const scorePointLabel = {
+  show: true,
+  position: 'right' as const,
+  fontSize: 9,
+  color: '#444',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  formatter: (p: any) => (Array.isArray(p.data) && p.data.length >= 3 ? String(p.data[2]) : '')
+};
 
 /** Build a frequency histogram from numpy-style counts and bin edges. */
 export function histogramOption(counts: number[], edges: number[]): EChartsOption {
@@ -172,6 +207,8 @@ export function scoresEllipseOption(
         type: 'scatter',
         symbolSize: 11,
         data: points,
+        label: scorePointLabel,
+        labelLayout: { hideOverlap: true, moveOverlap: 'shiftY' },
         markLine: {
           silent: true,
           symbol: 'none',
@@ -303,6 +340,67 @@ export function sequenceOption(values: (number | null)[]): EChartsOption {
     yAxis: { type: 'value', scale: true },
     series: [
       { type: 'line', data: values, showSymbol: false, lineStyle: { color: '#2b6cb0' } }
+    ]
+  };
+}
+
+/** Cumulative R² (calibration) vs Q² (cross-validation) per component, with the
+ * cross-validation-recommended component count highlighted. */
+export function r2q2Option(
+  components: number[],
+  r2: number[],
+  q2: number[],
+  target: string,
+  recommended: number | null = null
+): EChartsOption {
+  const mark =
+    recommended != null
+      ? {
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            lineStyle: { color: '#dd6b20', type: 'dashed' as const },
+            label: {
+              position: 'insideEndTop' as const,
+              color: '#dd6b20',
+              fontSize: 10,
+              formatter: 'recommended'
+            },
+            data: [{ xAxis: String(recommended) }]
+          }
+        }
+      : {};
+  return {
+    grid: { left: 56, right: 16, top: 36, bottom: 44 },
+    dataZoom: wheelZoom(),
+    legend: { top: 4, data: [`R² (${target})`, `Q² (${target}, cross-validated)`] },
+    tooltip: { trigger: 'axis', valueFormatter: (v) => fmtNum(v as number) },
+    xAxis: {
+      type: 'category',
+      data: components.map(String),
+      name: 'components',
+      nameLocation: 'middle',
+      nameGap: 28
+    },
+    yAxis: { type: 'value', name: 'cumulative fraction', scale: true },
+    series: [
+      {
+        name: `R² (${target})`,
+        type: 'line',
+        data: r2,
+        symbolSize: 7,
+        lineStyle: { color: '#2b6cb0' },
+        itemStyle: { color: '#2b6cb0' },
+        ...mark
+      },
+      {
+        name: `Q² (${target}, cross-validated)`,
+        type: 'line',
+        data: q2,
+        symbolSize: 7,
+        lineStyle: { color: '#2f855a' },
+        itemStyle: { color: '#2f855a' }
+      }
     ]
   };
 }

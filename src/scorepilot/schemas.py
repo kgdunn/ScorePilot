@@ -292,12 +292,32 @@ class ContributionsModel(ApiModel):
 
 
 class FitModelRequest(ApiModel):
-    """Request to fit a model variant from a dataset and a preprocessing spec."""
+    """Request to fit a model variant from a dataset and a preprocessing spec.
+
+    With ``auto_components`` the number of components is chosen by
+    cross-validation (the Q2-optimal count) and ``n_components`` is used only as
+    an upper bound on what is evaluated.
+    """
 
     dataset_id: str
     kind: Literal["PCA", "PLS"] = "PCA"
     n_components: int = Field(ge=1)
+    auto_components: bool = False
     conf_level: float = Field(default=0.95, gt=0.0, lt=1.0)
     name: str | None = None
     parent_id: int | None = None
     spec: PreprocessingSpecModel | None = None
+
+
+class CrossValidationModel(ApiModel):
+    """Per-component calibration R2 and cross-validated Q2 for a model."""
+
+    kind: str
+    target: str
+    n_splits: int
+    component_numbers: list[int]
+    r2: list[float]
+    q2: list[float]
+    r2_per_component: list[float]
+    q2_per_component: list[float]
+    recommended: int

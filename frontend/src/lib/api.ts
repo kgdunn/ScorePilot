@@ -293,6 +293,8 @@ export interface FitModelRequest {
   dataset_id: string;
   kind: 'PCA' | 'PLS';
   n_components: number;
+  /** Choose the component count by cross-validation instead of n_components. */
+  auto_components?: boolean;
   name?: string | null;
   parent_id?: number | null;
   spec?: Record<string, unknown>;
@@ -330,4 +332,22 @@ export async function getContributions(
   observation: number
 ): Promise<Contributions> {
   return asJson(await fetch(`/api/models/${modelId}/contributions/${observation}`));
+}
+
+export interface CrossValidation {
+  kind: string;
+  /** What R²/Q² describe: "X" for PCA, "Y" for PLS. */
+  target: string;
+  n_splits: number;
+  component_numbers: number[];
+  r2: number[];
+  q2: number[];
+  r2_per_component: number[];
+  q2_per_component: number[];
+  recommended: number;
+}
+
+/** Per-component calibration R² and cross-validated Q² for a fitted model. */
+export async function getCrossValidation(modelId: number): Promise<CrossValidation> {
+  return asJson(await fetch(`/api/models/${modelId}/cross-validation`));
 }

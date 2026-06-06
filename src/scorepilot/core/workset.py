@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+from process_improve.multivariate import MCUVScaler
 
 from scorepilot.core._pandas import column as get_column
 from scorepilot.core._pandas import to_numeric
@@ -166,16 +167,28 @@ def _center_scale(
     scaling: Mapping[str, ScalingKind],
     default: ScalingKind,
 ) -> pd.DataFrame:
-    out = frame.astype(float).copy()
+    """Mean-center every column and apply each column's scaling.
+
+    The centering and unit-variance scaling come from ``process_improve``'s
+    ``MCUVScaler`` (mean centre, divide by the ``ddof=1`` standard deviation, and
+    leave zero-variance columns centred only). Pareto scaling reuses the same
+    fitted statistics - dividing by ``sqrt(std)`` instead of ``std`` - so every
+    scaling kind shares one source of truth for the column means and spreads.
+    """
+    numeric = frame.astype(float)
+    scaler = MCUVScaler().fit(numeric)
+    centered = numeric - scaler.center_
+    unit_variance = scaler.transform(numeric)  # mean-centred, unit variance
+
+    out = numeric.copy()
     for name in list(out.columns):
         kind = scaling.get(str(name), default)
-        series = get_column(out, str(name))
-        centered = series - series.mean()
-        std = float(np.nanstd(series.to_numpy(dtype=float), ddof=1))
-        if std > 0 and kind is ScalingKind.UNIT_VARIANCE:
-            out[name] = centered / std
-        elif std > 0 and kind is ScalingKind.PARETO:
-            out[name] = centered / np.sqrt(std)
-        else:
-            out[name] = centered
+        if kind is ScalingKind.UNIT_VARIANCE:
+            out[name] = unit_variance[name]
+        elif kind is ScalingKind.PARETO:
+            # MCUVScaler stores std (zero-variance -> 1.0); sqrt(std) is Pareto,
+            # and sqrt(1.0) leaves a zero-variance column centred only.
+            out[name] = centered[name] / np.sqrt(scaler.scale_[name])
+        else:  # ScalingKind.NONE
+            out[name] = centered[name]
     return out

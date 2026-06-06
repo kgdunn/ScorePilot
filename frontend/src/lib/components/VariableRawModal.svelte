@@ -1,20 +1,12 @@
 <script lang="ts">
-  import type { Contributions } from '$lib/api';
-  import { oneComponentOption } from '$lib/echarts';
-  import Chart from './Chart.svelte';
+  import VariableInspector from './VariableInspector.svelte';
 
   interface Props {
-    contributions: Contributions;
-    /** Which diagnostic the contributions explain. */
-    metric: 't2' | 'spe';
+    datasetId: string;
+    column: string;
     onclose: () => void;
-    /** Fired when a contribution bar is clicked, with that variable's name. */
-    onVariableClick?: (variable: string) => void;
   }
-  let { contributions, metric, onclose, onVariableClick }: Props = $props();
-
-  const label = $derived(metric === 'spe' ? 'SPE' : "Hotelling's T²");
-  const values = $derived(metric === 'spe' ? contributions.spe : contributions.t2);
+  let { datasetId, column, onclose }: Props = $props();
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') onclose();
@@ -30,23 +22,15 @@
     class="modal"
     role="dialog"
     aria-modal="true"
-    aria-label="Contribution plot"
+    aria-label="Raw variable data"
     tabindex="-1"
     onclick={(e) => e.stopPropagation()}
   >
     <header>
-      <h3>Contributions to {label} · {contributions.observation_name}</h3>
+      <h3>Raw data · {column}</h3>
       <button type="button" class="close" aria-label="Close" onclick={onclose}>×</button>
     </header>
-    <p class="hint">
-      Per-variable contribution of this observation to its {label}. Click a bar to
-      see that variable's raw data.
-    </p>
-    <Chart
-      option={oneComponentOption(contributions.variable_names, values, `${label} contribution`, 'bar', 'variable')}
-      height="340px"
-      onitemclick={(a) => onVariableClick?.(contributions.variable_names[a.dataIndex])}
-    />
+    <VariableInspector {datasetId} {column} />
   </div>
 </div>
 
@@ -58,14 +42,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 50;
+    /* Above the contribution modal (z-index 50) it opens from. */
+    z-index: 60;
     padding: 1rem;
   }
   .modal {
     background: #fff;
     border-radius: 8px;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
-    width: min(760px, 100%);
+    width: min(640px, 100%);
     max-height: 90vh;
     overflow: auto;
     padding: 1rem 1.25rem 1.25rem;
@@ -75,15 +60,11 @@
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+    margin-bottom: 0.5rem;
   }
   h3 {
     margin: 0;
     font-size: 1.05rem;
-  }
-  .hint {
-    margin: 0.25rem 0 0.5rem;
-    color: #666;
-    font-size: 0.85rem;
   }
   .close {
     border: none;

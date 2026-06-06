@@ -346,6 +346,74 @@ def test_get_unknown_model_is_404(client: TestClient) -> None:
     assert client.get("/api/models/999").status_code == 404
 
 
+def test_scores_use_primary_identifier_labels(client: TestClient) -> None:
+    # The "sample" column (obs0..obs29) is the auto-detected primary identifier,
+    # so scores and contributions are labelled with it, not positional integers.
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 2}
+    )
+    diag = created.json()["diagnostics"]
+    assert diag["scores"]["observation_names"][:3] == ["obs0", "obs1", "obs2"]
+
+    model_id = created.json()["summary"]["id"]
+    contrib = client.get(f"/api/models/{model_id}/contributions/3").json()
+    assert contrib["observation_name"] == "obs3"
+
+
+def test_excluded_rows_keep_identifier_alignment(client: TestClient) -> None:
+    # Excluding a row must not shift the remaining identifier labels.
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models",
+        json={
+            "dataset_id": dataset_id,
+            "kind": "PCA",
+            "n_components": 2,
+            "spec": {"x_columns": ["v0", "v1", "v2", "v3"], "excluded_rows": [0]},
+        },
+    )
+    names = created.json()["diagnostics"]["scores"]["observation_names"]
+    assert names[:3] == ["obs1", "obs2", "obs3"]
+
+
+def test_auto_components_picks_count_by_cross_validation(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    # With auto_components the count is chosen by cross-validation, so it lands in
+    # the valid range for the four quantitative columns rather than the typed value.
+    created = client.post(
+        "/api/models",
+        json={
+            "dataset_id": dataset_id,
+            "kind": "PCA",
+            "n_components": 2,
+            "auto_components": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    n = created.json()["summary"]["n_components"]
+    assert 1 <= n <= 4
+
+
+def test_cross_validation_endpoint(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 3}
+    )
+    model_id = created.json()["summary"]["id"]
+    cv = client.get(f"/api/models/{model_id}/cross-validation")
+    assert cv.status_code == 200, cv.text
+    body = cv.json()
+    assert body["component_numbers"] == [1, 2, 3]
+    assert len(body["r2"]) == len(body["q2"]) == 3
+    assert 1 <= body["recommended"] <= 3
+    assert body["target"] == "X"
+
+
+def test_cross_validation_unknown_model_is_404(client: TestClient) -> None:
+    assert client.get("/api/models/999/cross-validation").status_code == 404
+
+
 def test_list_samples(client: TestClient) -> None:
     names = {s["name"] for s in client.get("/api/datasets/samples").json()}
     assert {

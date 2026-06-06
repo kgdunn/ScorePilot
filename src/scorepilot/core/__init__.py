@@ -6,6 +6,7 @@ FastAPI, SQLAlchemy, or any other web/DB dependency: the boundary is
 load-bearing and keeps the numerics independently testable.
 """
 
+from scorepilot.core.cross_validation import CrossValidation, cross_validate
 from scorepilot.core.modeling import (
     Contributions,
     ModelDiagnostics,
@@ -41,6 +42,7 @@ __all__ = [
     "AppliedWorkset",
     "ColumnType",
     "Contributions",
+    "CrossValidation",
     "IdentifierRole",
     "ModelDiagnostics",
     "PCAResult",
@@ -53,6 +55,7 @@ __all__ = [
     "VariableTransform",
     "apply_spec",
     "apply_transform",
+    "cross_validate",
     "fit_model",
     "fit_pca",
     "histogram",
