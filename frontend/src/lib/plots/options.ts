@@ -235,8 +235,11 @@ export function scatterOption(cfg: ScatterConfig): EChartsOption {
       yAxisIndex: 0,
       seriesIndex: 0,
       brushStyle: LASSO_STYLE,
-      throttleType: 'debounce',
-      throttleDelay: 80,
+      // No throttle: ECharts does not emit a final `brush` on mouse-up (only
+      // `brushEnd`), so the last `brushSelected` must land synchronously before
+      // we read it on release - otherwise a quick touch lasso selects nothing.
+      throttleType: 'fixRate',
+      throttleDelay: 0,
       removeOnClick: false
     };
   }
