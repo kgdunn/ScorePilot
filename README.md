@@ -47,10 +47,22 @@ loadings, T² and SPE with control limits, and VIP, all interactive:
   the plots collapse to a single, readable axis automatically.
 - **Interrogate the model** - plot any pair of components (or sequence order), hover a
   score to read its SPE and T², and double-click or long-press any point to open its
-  **contribution plot** and see which variables drive it.
+  **contribution plot** and see which variables drive it. Long-press a loadings point to
+  jump straight to that variable's raw data.
+- **Select and link across every plot** - switch a plot into arrow or lasso mode and pick
+  out points; the selection lights up the **same** rows (or variables) in every other
+  plot - scores, loadings, T², SPE, VIP, and contributions - so a cluster you spot in one
+  view is instantly visible everywhere. The lasso is forgiving on touch: a partial ring
+  closes itself.
+- **Colour and size by what matters** - shade or scale the score points by SPE or
+  Hotelling's T² to make outliers jump out.
+- **Act on a selection** - fork a new model variant straight from a brushed set: exclude
+  the selected samples (or keep only them) and refit in one click, with the lineage
+  recorded automatically.
 - **Keep a history** - every model variant lands in the **Hangar**, and each one carries
   a **Logbook** recording its preprocessing, exclusions, and lineage, so you can branch a
-  new variant from an existing one and compare.
+  new variant from an existing one and compare. The running version is always shown,
+  faint, in the top-right corner so you know exactly what you are looking at.
 
 Your datasets and models are saved, so they survive a restart and are there when you
 come back.
@@ -93,6 +105,11 @@ ScorePilot is a FastAPI + SQLAlchemy backend with a SvelteKit (Svelte 5) + EChar
 frontend, wrapping the [`process-improve`](https://github.com/kgdunn/process_improve)
 chemometrics library for the numerics. The numerical `core/` is pure and has no web or
 database imports.
+
+The frontend ships two standalone, domain-agnostic libraries that know nothing about
+chemometrics and can be reused elsewhere: `frontend/src/lib/grid/` (a dependency-free
+data grid) and `frontend/src/lib/plots/` (a linked-plots collection with
+brushing-and-linking; see [`frontend/src/lib/plots/README.md`](frontend/src/lib/plots/README.md)).
 
 - Architecture, the dataset / preprocessing-spec model, and the reusable data grid:
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
