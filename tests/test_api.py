@@ -58,6 +58,15 @@ def test_version(client: TestClient) -> None:
     assert isinstance(body["version"], str) and body["version"]
 
 
+def test_html_shell_is_not_cached(client: TestClient) -> None:
+    # The SPA shell must always revalidate so a redeploy is picked up at once,
+    # avoiding a stale cached shell pointing at removed hashed chunks.
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers.get("content-type", "").startswith("text/html")
+    assert resp.headers.get("cache-control") == "no-cache"
+
+
 def test_upload_returns_detail(client: TestClient) -> None:
     body = _upload_csv(client)
     assert body["n_rows"] == 30
