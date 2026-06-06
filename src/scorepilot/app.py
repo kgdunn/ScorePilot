@@ -50,15 +50,26 @@ class SpaStaticFiles(StaticFiles):
 
     This lets the single-page app own client-side routing while non-existent
     asset paths still return a real 404.
+
+    Cache policy avoids the stale-SPA trap (notably on iOS Safari): the HTML
+    shell is served ``no-cache`` so a new deploy is picked up immediately, while
+    SvelteKit's content-hashed assets under ``_app/immutable/`` are cached
+    forever. Without this, a cached shell can keep pointing at hashed chunks that
+    a redeploy has already removed, and the app loads only partially.
     """
 
     async def get_response(self, path: str, scope: Scope):  # noqa: ANN201
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as exc:
-            if exc.status_code == 404:
-                return await super().get_response("index.html", scope)
-            raise
+            if exc.status_code != 404:
+                raise
+            response = await super().get_response("index.html", scope)
+        if path.startswith("_app/immutable/"):
+            response.headers["cache-control"] = "public, max-age=31536000, immutable"
+        elif response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["cache-control"] = "no-cache"
+        return response
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

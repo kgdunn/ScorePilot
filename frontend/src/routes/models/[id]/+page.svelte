@@ -42,15 +42,17 @@
   let crossValidation = $state<CrossValidation | null>(null);
   let oneAxisKind = $state<OneAxisKind>('bar');
 
-  // Issue #63: the component explorer scrubs the count and previews the model at
-  // that count (`previewDiag`) before committing it in place. `diag` is whatever
-  // is currently on screen - the preview if scrubbing, else the stored model.
+  // Issue #63: the component explorer scrubs the count and applies it live (no
+  // Apply button). Diagnostics for each count are cached in the browser, so
+  // revisiting a count - e.g. stepping back down - is instant; only a brand-new
+  // (higher) count computes. Neighbours are prefetched so stepping feels instant
+  // both ways. The chosen count is persisted in the background (debounced).
   let components = $state(1);
-  let previewDiag = $state<ModelDiagnostics | null>(null);
-  let previewing = $state(false);
-  let applying = $state(false);
+  let saving = $state(false);
   let cvMax = $state(1);
-  const diag = $derived<ModelDiagnostics | null>(previewDiag ?? detail?.diagnostics ?? null);
+  let displayDiag = $state<ModelDiagnostics | null>(null);
+  let diagCache = new Map<number, ModelDiagnostics>();
+  const diag = $derived<ModelDiagnostics | null>(displayDiag);
   // Shared brushing context for this model's plots: a selection made in the
   // scores plot (rows) or loadings plot (columns) is highlighted everywhere.
   const link = createLinkGroup();
@@ -99,12 +101,14 @@
     void (async () => {
       try {
         crossValidation = null;
-        previewDiag = null;
         link.reset();
+        diagCache = new Map();
         detail = await getModel(mid);
         const dg = detail.diagnostics;
         const a = dg?.n_components ?? 0;
         components = detail.summary.n_components;
+        displayDiag = dg;
+        if (dg) diagCache.set(components, dg);
         // Reset axis pickers to the canonical pair for the loaded model.
         scoresX = 0;
         scoresY = a >= 2 ? 1 : 'seq';
@@ -130,50 +134,79 @@
     })();
   });
 
-  // Live preview: when the explorer's count differs from the stored model, fetch
-  // the diagnostics at that count (debounced) and render them in place of the
-  // stored ones. Keep the previous plots up while the fetch is in flight.
+  // Show the diagnostics for the current count: instant from cache, otherwise
+  // fetch (the only "going up to a new count" delay) and cache it.
   $effect(() => {
     const mid = id;
     const k = components;
-    const stored = detail?.summary.n_components;
-    if (!detail || stored == null || Number.isNaN(mid)) return;
-    if (k === stored) {
-      previewDiag = null;
-      previewing = false;
+    if (!detail || Number.isNaN(mid)) return;
+    const cached = diagCache.get(k);
+    if (cached) {
+      if (displayDiag !== cached) displayDiag = cached;
       return;
     }
     let cancelled = false;
-    previewing = true;
     const timer = setTimeout(() => {
       void getModel(mid, k)
         .then((d) => {
-          if (!cancelled) previewDiag = d.diagnostics;
+          if (cancelled || !d.diagnostics) return;
+          if (!diagCache.has(k)) diagCache.set(k, d.diagnostics);
+          if (components === k) displayDiag = diagCache.get(k) ?? d.diagnostics;
         })
-        .catch(() => {})
-        .finally(() => {
-          if (!cancelled) previewing = false;
-        });
-    }, 130);
+        .catch(() => {});
+    }, 110);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
   });
 
-  async function applyComponents() {
-    if (applying || !detail) return;
-    applying = true;
-    try {
-      detail = await updateModelComponents(id, components);
-      previewDiag = null;
-      components = detail.summary.n_components;
-    } catch (e) {
-      showError((e as Error).message);
-    } finally {
-      applying = false;
-    }
-  }
+  // Warm the neighbouring counts in the background so stepping is instant both
+  // ways (the next step down is already cached).
+  $effect(() => {
+    const mid = id;
+    const k = components;
+    if (!detail || Number.isNaN(mid)) return;
+    const timer = setTimeout(() => {
+      for (const n of [k - 1, k + 1]) {
+        if (n >= 1 && n <= cvMax && !diagCache.has(n)) {
+          void getModel(mid, n)
+            .then((d) => {
+              if (d.diagnostics && !diagCache.has(n)) diagCache.set(n, d.diagnostics);
+            })
+            .catch(() => {});
+        }
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  });
+
+  // Persist the chosen count in the background (debounced). Cache is write-once
+  // per count, so this never replaces what's on screen - no flash on settle.
+  $effect(() => {
+    const mid = id;
+    const k = components;
+    const stored = detail?.summary.n_components;
+    if (!detail || stored == null || Number.isNaN(mid) || k === stored) return;
+    let cancelled = false;
+    saving = true;
+    const timer = setTimeout(() => {
+      void updateModelComponents(mid, k)
+        .then((d) => {
+          if (cancelled) return;
+          if (d.diagnostics && !diagCache.has(k)) diagCache.set(k, d.diagnostics);
+          detail = d;
+        })
+        .catch((e) => showError((e as Error).message))
+        .finally(() => {
+          if (!cancelled) saving = false;
+        });
+    }, 700);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  });
 
   function axis(d: ModelDiagnostics, i: number): string {
     const name = d.component_names[i] ?? `PC${i + 1}`;
@@ -392,14 +425,63 @@
       <section class="diagnostics" data-testid="diagnostics">
         <ComponentExplorer
           bind:components
-          stored={detail.summary.n_components}
           max={cvMax}
           recommended={crossValidation?.recommended ?? null}
           cv={crossValidation}
-          {previewing}
-          {applying}
-          onapply={applyComponents}
+          {saving}
         />
+        {#if crossValidation}
+          {@const cv = crossValidation}
+          <div class="card wide r2card">
+            <h3>R² and cross-validated R² (Q²) per component</h3>
+            <p class="hint">
+              R² is the in-sample fit of {cv.target}; Q² is its cross-validated
+              ({cv.n_splits}-fold) prediction. The blue marker tracks the slider above;
+              cross-validation recommends
+              <strong>{cv.recommended}</strong>
+              component{cv.recommended === 1 ? '' : 's'}.
+            </p>
+            <LinePlot
+              series={[
+                { name: `R² (${cv.target})`, values: cv.r2, color: '#2b6cb0' },
+                { name: `Q² (${cv.target}, cross-validated)`, values: cv.q2, color: '#2f855a' }
+              ]}
+              labels={cv.component_numbers}
+              xName="components"
+              yName="cumulative fraction"
+              legend
+              xMarks={[
+                { value: String(components), label: `${components}`, color: '#2b6cb0' },
+                ...(cv.recommended !== components
+                  ? [{ value: String(cv.recommended), label: 'rec', color: '#dd6b20', dashed: true }]
+                  : [])
+              ]}
+              height="260px"
+            />
+            <table class="r2-table">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>R²</th>
+                  <th>R² (cum.)</th>
+                  <th>Q²</th>
+                  <th>Q² (cum.)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each cv.component_numbers as comp, i (comp)}
+                  <tr class:recommended={comp === cv.recommended} class:current={comp === components}>
+                    <td>{comp}</td>
+                    <td>{(cv.r2_per_component[i] * 100).toFixed(1)}%</td>
+                    <td>{(cv.r2[i] * 100).toFixed(1)}%</td>
+                    <td>{(cv.q2_per_component[i] * 100).toFixed(1)}%</td>
+                    <td>{(cv.q2[i] * 100).toFixed(1)}%</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
         <p class="hint">
           Double-click or long-press a point on the scores, T², or SPE plot to see its contribution
           plot. Use the arrow or lasso tools on the scores and loadings plots to select points; the
@@ -555,58 +637,6 @@
               height="260px"
             />
           </div>
-          {#if crossValidation}
-            {@const cv = crossValidation}
-            <div class="card wide">
-              <h3>R² and cross-validated R² (Q²) per component</h3>
-              <p class="hint">
-                R² is the in-sample fit of {cv.target}; Q² is its cross-validated
-                ({cv.n_splits}-fold) prediction. The blue marker tracks the explorer's current
-                count; cross-validation recommends
-                <strong>{cv.recommended}</strong>
-                component{cv.recommended === 1 ? '' : 's'}.
-              </p>
-              <LinePlot
-                series={[
-                  { name: `R² (${cv.target})`, values: cv.r2, color: '#2b6cb0' },
-                  { name: `Q² (${cv.target}, cross-validated)`, values: cv.q2, color: '#2f855a' }
-                ]}
-                labels={cv.component_numbers}
-                xName="components"
-                yName="cumulative fraction"
-                legend
-                xMarks={[
-                  { value: String(components), label: `${components}`, color: '#2b6cb0' },
-                  ...(cv.recommended !== components
-                    ? [{ value: String(cv.recommended), label: 'rec', color: '#dd6b20', dashed: true }]
-                    : [])
-                ]}
-                height="280px"
-              />
-              <table class="r2-table">
-                <thead>
-                  <tr>
-                    <th>Component</th>
-                    <th>R²</th>
-                    <th>R² (cum.)</th>
-                    <th>Q²</th>
-                    <th>Q² (cum.)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each cv.component_numbers as comp, i (comp)}
-                    <tr class:recommended={comp === cv.recommended} class:current={comp === components}>
-                      <td>{comp}</td>
-                      <td>{(cv.r2_per_component[i] * 100).toFixed(1)}%</td>
-                      <td>{(cv.r2[i] * 100).toFixed(1)}%</td>
-                      <td>{(cv.q2_per_component[i] * 100).toFixed(1)}%</td>
-                      <td>{(cv.q2[i] * 100).toFixed(1)}%</td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
         </div>
       </section>
     {:else}

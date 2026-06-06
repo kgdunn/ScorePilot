@@ -2,33 +2,24 @@
   import type { CrossValidation } from '$lib/api';
 
   interface Props {
-    /** Currently-explored component count (live-previewed). */
+    /** Current component count; changing it applies live (no Apply button). */
     components: number;
-    /** The count actually persisted on the model. */
-    stored: number;
     min?: number;
     max: number;
     recommended: number | null;
     cv: CrossValidation | null;
-    /** A preview fetch for the current count is in flight. */
-    previewing?: boolean;
-    /** An "apply" (persist) is in flight. */
-    applying?: boolean;
-    onapply: () => void;
+    /** A live auto-save of the new count is in flight. */
+    saving?: boolean;
   }
   let {
     components = $bindable(),
-    stored,
     min = 1,
     max,
     recommended,
     cv,
-    previewing = false,
-    applying = false,
-    onapply
+    saving = false
   }: Props = $props();
 
-  const dirty = $derived(components !== stored);
   const pct = (v: number | undefined): string =>
     v == null ? '–' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
 
@@ -49,12 +40,12 @@
   const step = (delta: number) => (components = clamp(components + delta));
 </script>
 
-<div class="explorer" class:dirty>
+<div class="explorer">
   <div class="count">
     <span class="label">Components</span>
     <div class="stepper">
       <button type="button" aria-label="Remove a component" disabled={components <= min} onclick={() => step(-1)}>−</button>
-      <span class="value" class:busy={previewing}>{components}</span>
+      <span class="value" class:busy={saving}>{components}</span>
       <button type="button" aria-label="Add a component" disabled={components >= max} onclick={() => step(1)}>+</button>
     </div>
     <input
@@ -87,14 +78,7 @@
         ✨ Recommended: {recommended}
       </button>
     {/if}
-    {#if dirty}
-      <button type="button" class="apply" disabled={applying} onclick={onapply}>
-        {applying ? 'Applying…' : `Apply ${components} component${components === 1 ? '' : 's'}`}
-      </button>
-      <span class="from">was {stored}</span>
-    {:else}
-      <span class="saved">✓ current model</span>
-    {/if}
+    <span class="saving" class:show={saving}>saving…</span>
   </div>
 
   {#if cv}
@@ -130,10 +114,6 @@
     top: 0;
     z-index: 30;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07);
-  }
-  .explorer.dirty {
-    border-color: #2b6cb0;
-    box-shadow: 0 0 0 1px #2b6cb0 inset;
   }
   .count {
     display: flex;
@@ -227,23 +207,14 @@
     color: #b85c14;
     background: #fff7ed;
   }
-  .apply {
-    border-color: #2b6cb0 !important;
-    background: #2b6cb0 !important;
-    color: #fff !important;
-    font-weight: 600;
-  }
-  .apply:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-  .from {
+  .saving {
     font-size: 0.78rem;
     color: #999;
+    opacity: 0;
+    transition: opacity 0.15s;
   }
-  .saved {
-    font-size: 0.82rem;
-    color: #2f855a;
+  .saving.show {
+    opacity: 1;
   }
   .gain {
     margin: 0;
