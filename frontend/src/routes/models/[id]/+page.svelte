@@ -17,6 +17,7 @@
   import ComponentExplorer from '$lib/components/ComponentExplorer.svelte';
   import {
     BarPlot,
+    LinePlot,
     ScatterPlot,
     createLinkGroup,
     fmtNum,
@@ -560,11 +561,28 @@
               <h3>R² and cross-validated R² (Q²) per component</h3>
               <p class="hint">
                 R² is the in-sample fit of {cv.target}; Q² is its cross-validated
-                ({cv.n_splits}-fold) prediction. The curve and the live preview are in the
-                component explorer above; cross-validation recommends
+                ({cv.n_splits}-fold) prediction. The blue marker tracks the explorer's current
+                count; cross-validation recommends
                 <strong>{cv.recommended}</strong>
                 component{cv.recommended === 1 ? '' : 's'}.
               </p>
+              <LinePlot
+                series={[
+                  { name: `R² (${cv.target})`, values: cv.r2, color: '#2b6cb0' },
+                  { name: `Q² (${cv.target}, cross-validated)`, values: cv.q2, color: '#2f855a' }
+                ]}
+                labels={cv.component_numbers}
+                xName="components"
+                yName="cumulative fraction"
+                legend
+                xMarks={[
+                  { value: String(components), label: `${components}`, color: '#2b6cb0' },
+                  ...(cv.recommended !== components
+                    ? [{ value: String(cv.recommended), label: 'rec', color: '#dd6b20', dashed: true }]
+                    : [])
+                ]}
+                height="280px"
+              />
               <table class="r2-table">
                 <thead>
                   <tr>
@@ -577,7 +595,7 @@
                 </thead>
                 <tbody>
                   {#each cv.component_numbers as comp, i (comp)}
-                    <tr class:recommended={comp === cv.recommended}>
+                    <tr class:recommended={comp === cv.recommended} class:current={comp === components}>
                       <td>{comp}</td>
                       <td>{(cv.r2_per_component[i] * 100).toFixed(1)}%</td>
                       <td>{(cv.r2[i] * 100).toFixed(1)}%</td>
@@ -805,6 +823,14 @@
   .r2-table tr.recommended {
     background: #fffaf0;
     font-weight: 600;
+  }
+  /* The component currently shown in the explorer / slider. */
+  .r2-table tr.current {
+    background: #e8f1fb;
+    box-shadow: inset 3px 0 0 #2b6cb0;
+  }
+  .r2-table tr.current.recommended {
+    background: #eef2f0;
   }
   /* On narrow screens, stack the diagnostic cards in a single column. */
   @media (max-width: 900px) {
