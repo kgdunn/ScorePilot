@@ -314,6 +314,22 @@ class FitModelRequest(ApiModel):
     spec: PreprocessingSpecModel | None = None
 
 
+class VariantRequest(ApiModel):
+    """Create a child model variant from a brushed selection.
+
+    ``observations`` are primary-identifier values and ``variables`` are column
+    names (exactly what the plots' selection carries). In ``exclude`` mode the
+    selected observations / variables are added to the parent's exclusions; in
+    ``keep`` mode every *other* currently-active observation is excluded instead
+    (variables are ignored in ``keep`` mode).
+    """
+
+    observations: list[str] = Field(default_factory=list)
+    variables: list[str] = Field(default_factory=list)
+    mode: Literal["exclude", "keep"] = "exclude"
+    name: str | None = None
+
+
 class CrossValidationModel(ApiModel):
     """Per-component calibration R2 and cross-validated Q2 for a model."""
 
