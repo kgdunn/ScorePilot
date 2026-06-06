@@ -6,6 +6,7 @@
     getContributions,
     getCrossValidation,
     getModel,
+    updateModelComponents,
     type Contributions,
     type CrossValidation,
     type ModelDetail,
@@ -13,9 +14,9 @@
   } from '$lib/api';
   import { showError } from '$lib/toast.svelte';
   import { formatDateTime } from '$lib/format';
+  import ComponentExplorer from '$lib/components/ComponentExplorer.svelte';
   import {
     BarPlot,
-    LinePlot,
     ScatterPlot,
     createLinkGroup,
     fmtNum,
@@ -39,6 +40,16 @@
   let detail = $state<ModelDetail | null>(null);
   let crossValidation = $state<CrossValidation | null>(null);
   let oneAxisKind = $state<OneAxisKind>('bar');
+
+  // Issue #63: the component explorer scrubs the count and previews the model at
+  // that count (`previewDiag`) before committing it in place. `diag` is whatever
+  // is currently on screen - the preview if scrubbing, else the stored model.
+  let components = $state(1);
+  let previewDiag = $state<ModelDiagnostics | null>(null);
+  let previewing = $state(false);
+  let applying = $state(false);
+  let cvMax = $state(1);
+  const diag = $derived<ModelDiagnostics | null>(previewDiag ?? detail?.diagnostics ?? null);
   // Shared brushing context for this model's plots: a selection made in the
   // scores plot (rows) or loadings plot (columns) is highlighted everywhere.
   const link = createLinkGroup();
@@ -87,19 +98,27 @@
     void (async () => {
       try {
         crossValidation = null;
+        previewDiag = null;
         link.reset();
         detail = await getModel(mid);
+        const dg = detail.diagnostics;
+        const a = dg?.n_components ?? 0;
+        components = detail.summary.n_components;
         // Reset axis pickers to the canonical pair for the loaded model.
-        const a = detail.diagnostics?.n_components ?? 0;
         scoresX = 0;
         scoresY = a >= 2 ? 1 : 'seq';
         loadingsX = 0;
         loadingsY = a >= 2 ? 1 : 'seq';
         // Cross-validation is recomputed server-side; load it separately so a
         // failure (e.g. too few rows) doesn't block the rest of the diagnostics.
-        if (detail.diagnostics) {
+        // Extend the curve past the current count (bounded by rank) so the
+        // explorer can show the value of adding more components.
+        if (dg) {
+          const kVars = dg.x_loadings.variable_names.length;
+          const nObs = dg.scores.data.length;
+          cvMax = Math.max(a, Math.min(20, kVars, Math.max(1, nObs - 1)));
           try {
-            crossValidation = await getCrossValidation(mid);
+            crossValidation = await getCrossValidation(mid, cvMax);
           } catch {
             crossValidation = null;
           }
@@ -109,6 +128,51 @@
       }
     })();
   });
+
+  // Live preview: when the explorer's count differs from the stored model, fetch
+  // the diagnostics at that count (debounced) and render them in place of the
+  // stored ones. Keep the previous plots up while the fetch is in flight.
+  $effect(() => {
+    const mid = id;
+    const k = components;
+    const stored = detail?.summary.n_components;
+    if (!detail || stored == null || Number.isNaN(mid)) return;
+    if (k === stored) {
+      previewDiag = null;
+      previewing = false;
+      return;
+    }
+    let cancelled = false;
+    previewing = true;
+    const timer = setTimeout(() => {
+      void getModel(mid, k)
+        .then((d) => {
+          if (!cancelled) previewDiag = d.diagnostics;
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) previewing = false;
+        });
+    }, 130);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  });
+
+  async function applyComponents() {
+    if (applying || !detail) return;
+    applying = true;
+    try {
+      detail = await updateModelComponents(id, components);
+      previewDiag = null;
+      components = detail.summary.n_components;
+    } catch (e) {
+      showError((e as Error).message);
+    } finally {
+      applying = false;
+    }
+  }
 
   function axis(d: ModelDiagnostics, i: number): string {
     const name = d.component_names[i] ?? `PC${i + 1}`;
@@ -321,10 +385,20 @@
       {/if}
     </section>
 
-    {#if detail.diagnostics}
-      {@const d = detail.diagnostics}
+    {#if diag}
+      {@const d = diag}
       {@const oneComponent = d.n_components < 2}
       <section class="diagnostics" data-testid="diagnostics">
+        <ComponentExplorer
+          bind:components
+          stored={detail.summary.n_components}
+          max={cvMax}
+          recommended={crossValidation?.recommended ?? null}
+          cv={crossValidation}
+          {previewing}
+          {applying}
+          onapply={applyComponents}
+        />
         <p class="hint">
           Double-click or long-press a point on the scores, T², or SPE plot to see its contribution
           plot. Use the arrow or lasso tools on the scores and loadings plots to select points; the
@@ -486,22 +560,11 @@
               <h3>R² and cross-validated R² (Q²) per component</h3>
               <p class="hint">
                 R² is the in-sample fit of {cv.target}; Q² is its cross-validated
-                ({cv.n_splits}-fold) prediction. Cross-validation recommends
+                ({cv.n_splits}-fold) prediction. The curve and the live preview are in the
+                component explorer above; cross-validation recommends
                 <strong>{cv.recommended}</strong>
                 component{cv.recommended === 1 ? '' : 's'}.
               </p>
-              <LinePlot
-                series={[
-                  { name: `R² (${cv.target})`, values: cv.r2, color: '#2b6cb0' },
-                  { name: `Q² (${cv.target}, cross-validated)`, values: cv.q2, color: '#2f855a' }
-                ]}
-                labels={cv.component_numbers}
-                xName="components"
-                yName="cumulative fraction"
-                legend
-                xMarks={[{ value: String(cv.recommended), label: 'recommended' }]}
-                height="280px"
-              />
               <table class="r2-table">
                 <thead>
                   <tr>
