@@ -249,6 +249,31 @@ def test_variable_inspector_unknown_column_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_variable_inspector_primary_identifier(client: TestClient) -> None:
+    # Issue #59: a labelled primary identifier ("sample" = obs0..obs29) is carried
+    # per row and flagged non-sequential, so plots label by it rather than "1..n".
+    dataset_id = _upload_csv(client)["dataset_id"]
+    inspector = client.get(f"/api/datasets/{dataset_id}/variables/v0").json()
+    assert inspector["is_sequential"] is False
+    assert inspector["identifiers"][:3] == ["obs0", "obs1", "obs2"]
+    assert len(inspector["identifiers"]) == len(inspector["sequence"]) == 30
+
+    # Identifiers stay aligned with the sequence after excluding rows.
+    trimmed = client.get(
+        f"/api/datasets/{dataset_id}/variables/v0?excluded_rows=0&excluded_rows=1"
+    ).json()
+    assert trimmed["identifiers"][0] == "obs2"
+    assert len(trimmed["identifiers"]) == len(trimmed["sequence"]) == 28
+
+
+def test_variable_inspector_synthetic_id_is_sequential(client: TestClient) -> None:
+    # A synthetic "Row" identifier is genuinely sequential, so plots keep "1..n".
+    body = _upload(client, b"a,b\n0.1,1.1\n0.2,1.2\n0.3,1.3\n")
+    inspector = client.get(f"/api/datasets/{body['dataset_id']}/variables/a").json()
+    assert inspector["is_sequential"] is True
+    assert inspector["identifiers"] == ["1", "2", "3"]
+
+
 def test_fit_model_hangar_and_logbook(client: TestClient) -> None:
     dataset_id = _upload_csv(client)["dataset_id"]
 

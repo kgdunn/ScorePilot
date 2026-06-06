@@ -133,6 +133,11 @@ class VariableInspector(ApiModel):
     histogram_counts: list[int]
     histogram_edges: list[float]
     sequence: list[float | None]
+    # Primary-identifier value per row, aligned with ``sequence`` (issue #59).
+    identifiers: list[str | None]
+    # Whether the primary identifier is genuinely sequential (a synthetic Row
+    # column or a monotonic run order); when false, plots label by the identifier.
+    is_sequential: bool
 
 
 class GridWindow(ApiModel):
