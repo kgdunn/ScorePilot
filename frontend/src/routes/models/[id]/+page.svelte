@@ -540,14 +540,14 @@
               {@const canonical = scoresX === 0 && scoresY === 1}
               <div class="encode">
                 <label>Color by
-                  <select bind:value={colorBy}>
+                  <select data-testid="color-by" bind:value={colorBy}>
                     <option value="none">None</option>
                     <option value="spe">SPE</option>
                     <option value="t2">Hotelling's T²</option>
                   </select>
                 </label>
                 <label>Size by
-                  <select bind:value={sizeBy}>
+                  <select data-testid="size-by" bind:value={sizeBy}>
                     <option value="none">None</option>
                     <option value="spe">SPE</option>
                     <option value="t2">Hotelling's T²</option>
