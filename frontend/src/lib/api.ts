@@ -319,8 +319,20 @@ export async function listModels(): Promise<ModelSummary[]> {
   return asJson(await fetch('/api/models'));
 }
 
-export async function getModel(id: number): Promise<ModelDetail> {
-  return asJson(await fetch(`/api/models/${id}`));
+export async function getModel(id: number, nComponents?: number): Promise<ModelDetail> {
+  const q = nComponents ? `?n_components=${nComponents}` : '';
+  return asJson(await fetch(`/api/models/${id}${q}`));
+}
+
+/** Change a model's component count in place (no new variant) and refit. */
+export async function updateModelComponents(id: number, nComponents: number): Promise<ModelDetail> {
+  return asJson(
+    await fetch(`/api/models/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ n_components: nComponents })
+    })
+  );
 }
 
 export interface Contributions {
@@ -353,8 +365,12 @@ export interface CrossValidation {
 }
 
 /** Per-component calibration R² and cross-validated Q² for a fitted model. */
-export async function getCrossValidation(modelId: number): Promise<CrossValidation> {
-  return asJson(await fetch(`/api/models/${modelId}/cross-validation`));
+export async function getCrossValidation(
+  modelId: number,
+  maxComponents?: number
+): Promise<CrossValidation> {
+  const q = maxComponents ? `?max_components=${maxComponents}` : '';
+  return asJson(await fetch(`/api/models/${modelId}/cross-validation${q}`));
 }
 
 export interface VariantRequest {

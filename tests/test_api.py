@@ -378,6 +378,42 @@ def test_variant_unknown_model_is_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def test_preview_components_does_not_persist(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    model_id = _fit_model(client, dataset_id)  # 2 components
+
+    preview = client.get(f"/api/models/{model_id}?n_components=3").json()
+    assert len(preview["diagnostics"]["component_names"]) == 3
+    # The stored model is untouched by a preview.
+    assert client.get(f"/api/models/{model_id}").json()["summary"]["n_components"] == 2
+
+
+def test_update_components_in_place(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    model_id = _fit_model(client, dataset_id)  # 2 components
+
+    resp = client.patch(f"/api/models/{model_id}", json={"n_components": 3})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["summary"]["id"] == model_id  # same model, not a new variant
+    assert body["summary"]["n_components"] == 3
+    assert len(body["diagnostics"]["component_names"]) == 3
+    # Persisted: a fresh fetch reflects the new count.
+    assert client.get(f"/api/models/{model_id}").json()["summary"]["n_components"] == 3
+
+
+def test_update_components_unknown_model_is_404(client: TestClient) -> None:
+    assert client.patch("/api/models/9999", json={"n_components": 2}).status_code == 404
+
+
+def test_cross_validation_max_components_extends_curve(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    model_id = _fit_model(client, dataset_id)  # 2 components
+
+    cv = client.get(f"/api/models/{model_id}/cross-validation?max_components=4").json()
+    assert max(cv["component_numbers"]) >= 3
+
+
 def test_model_contributions(client: TestClient) -> None:
     dataset_id = _upload_csv(client)["dataset_id"]
     created = client.post(

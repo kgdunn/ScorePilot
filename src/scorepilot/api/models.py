@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import io
 from dataclasses import replace
+from typing import Annotated
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from scorepilot.api.deps import DatasetStoreDep, RepositoryDep
 from scorepilot.core import (
@@ -32,6 +33,7 @@ from scorepilot.schemas import (
     ModelSummary,
     PCAFitResponse,
     ScoresPayload,
+    UpdateModelRequest,
     VariantRequest,
 )
 
@@ -307,11 +309,20 @@ def list_models(repository: RepositoryDep) -> list[ModelSummary]:
 
 
 @router.get("/{model_id}", response_model=ModelDetail)
-def get_model(model_id: int, store: DatasetStoreDep, repository: RepositoryDep) -> ModelDetail:
+def get_model(
+    model_id: int,
+    store: DatasetStoreDep,
+    repository: RepositoryDep,
+    n_components: Annotated[int | None, Query(ge=1)] = None,
+) -> ModelDetail:
     """Return a model's Logbook: metadata, recipe, lineage, and diagnostics.
 
     Diagnostics are recomputed from the source dataset and stored spec. If the
     dataset is no longer in memory, the entry is returned without diagnostics.
+
+    ``n_components`` previews the diagnostics at a different component count
+    without persisting it - this backs the live component explorer, which scrubs
+    the count and re-renders every plot before you commit the change.
     """
     model = repository.get(model_id)
     if model is None:
@@ -324,7 +335,7 @@ def get_model(model_id: int, store: DatasetStoreDep, repository: RepositoryDep) 
     if dataset is not None:
         spec = PreprocessingSpec.from_dict(model.preprocessing)
         try:
-            diag = _run_fit(dataset, spec, model.kind, model.n_components, 0.95)
+            diag = _run_fit(dataset, spec, model.kind, n_components or model.n_components, 0.95)
             diagnostics = _diagnostics_model(diag)
         except ValueError:
             diagnostics = None
@@ -335,6 +346,48 @@ def get_model(model_id: int, store: DatasetStoreDep, repository: RepositoryDep) 
         excluded_samples=list(model.excluded_samples),
         lineage=[_summary(m) for m in repository.lineage(model.id)],
         diagnostics=diagnostics,
+    )
+
+
+@router.patch("/{model_id}", response_model=ModelDetail)
+def update_model(
+    model_id: int, request: UpdateModelRequest, store: DatasetStoreDep, repository: RepositoryDep
+) -> ModelDetail:
+    """Change a model's component count in place and refit (no new variant).
+
+    Backs the component explorer's "apply": the same model keeps its identity,
+    preprocessing, and lineage; only ``n_components`` changes.
+    """
+    model = repository.get(model_id)
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown model id: {model_id}"
+        )
+    dataset = store.get(model.dataset_id) if model.dataset_id else None
+    if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source dataset is no longer loaded; cannot refit.",
+        )
+
+    spec = PreprocessingSpec.from_dict(model.preprocessing)
+    try:
+        diag = _run_fit(dataset, spec, model.kind, request.n_components, 0.95)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    model.n_components = diag.n_components
+    model.params = _pack_params(diag)
+    repository.update(model)
+
+    return ModelDetail(
+        summary=_summary(model),
+        preprocessing=dict(model.preprocessing),
+        excluded_samples=list(model.excluded_samples),
+        lineage=[_summary(m) for m in repository.lineage(model.id)],
+        diagnostics=_diagnostics_model(diag),
     )
 
 
@@ -387,13 +440,20 @@ def model_contributions(
 
 @router.get("/{model_id}/cross-validation", response_model=CrossValidationModel)
 def model_cross_validation(
-    model_id: int, store: DatasetStoreDep, repository: RepositoryDep
+    model_id: int,
+    store: DatasetStoreDep,
+    repository: RepositoryDep,
+    max_components: Annotated[int | None, Query(ge=1)] = None,
 ) -> CrossValidationModel:
     """Per-component calibration R2 and cross-validated Q2 for a fitted model.
 
     Backs the R2/Q2 plot and table: R2 is the in-sample fit after each component,
     Q2 the cross-validated (out-of-sample) prediction, with the Q2-optimal
     component count flagged.
+
+    ``max_components`` extends the curve beyond the model's current count (capped
+    at the auto-fit ceiling) so the component explorer can show the diminishing
+    returns of adding more.
     """
     model = repository.get(model_id)
     if model is None:
@@ -407,10 +467,11 @@ def model_cross_validation(
             detail="Source dataset is no longer loaded; cannot cross-validate.",
         )
 
+    ceiling = min(max_components or model.n_components, _AUTO_MAX_COMPONENTS)
     spec = PreprocessingSpec.from_dict(model.preprocessing)
     applied = apply_spec(dataset.raw, spec)
     try:
-        cv = cross_validate(applied.X, applied.Y, model.kind, max_components=model.n_components)
+        cv = cross_validate(applied.X, applied.Y, model.kind, max_components=ceiling)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
