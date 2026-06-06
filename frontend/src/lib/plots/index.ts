@@ -10,7 +10,7 @@ export { default as LinePlot } from './LinePlot.svelte';
 export { default as Histogram } from './Histogram.svelte';
 
 export { LinkGroup, createLinkGroup } from './link.svelte';
-export { SELECT_BORDER } from './options';
+export { SELECT_BORDER, fmtNum } from './options';
 export type { LineSeries } from './options';
 export type {
   AxisControl,

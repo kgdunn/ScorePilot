@@ -11,25 +11,35 @@
   } from '$lib/api';
   import { showError } from '$lib/toast.svelte';
   import { formatDateTime } from '$lib/format';
-  import Chart, { type ChartActivation } from '$lib/components/Chart.svelte';
+  import {
+    BarPlot,
+    LinePlot,
+    ScatterPlot,
+    createLinkGroup,
+    fmtNum,
+    type AxisControl,
+    type ChartActivation,
+    type LimitLine,
+    type OverlayLine,
+    type PlotPoint
+  } from '$lib/plots';
   import ContributionModal from '$lib/components/ContributionModal.svelte';
   import VariableRawModal from '$lib/components/VariableRawModal.svelte';
-  import {
-    barWithLimitOption,
-    loadingsOption,
-    oneComponentOption,
-    r2q2Option,
-    scoresEllipseOption,
-    vipOption,
-    type OneAxisKind,
-    type ScatterPoint
-  } from '$lib/echarts';
+
+  /** Chart type for the single-component (1-axis) scores/loadings plots. */
+  type OneAxisKind = 'bar' | 'line' | 'scatter';
+  /** A score point carries SPE / T² so the hover can show them. */
+  type ScorePt = PlotPoint & { spe?: number; t2?: number };
+  /** Grey dashed baseline at y = 0 for the single-component plots. */
+  const BASELINE: LimitLine = { value: 0, color: '#bbb', dashed: true, label: '' };
 
   const id = $derived(Number($page.params.id));
   let detail = $state<ModelDetail | null>(null);
   let crossValidation = $state<CrossValidation | null>(null);
-  // Chart type for the single-component (1-axis) scores/loadings plots.
   let oneAxisKind = $state<OneAxisKind>('bar');
+  // Shared brushing context for this model's plots: a selection made in the
+  // scores plot (rows) or loadings plot (columns) is highlighted everywhere.
+  const link = createLinkGroup();
   // Axis selection for the scores/loadings scatters: a component index, or 'seq'
   // for the data's sequence (observation/variable) order.
   type AxisSel = number | 'seq';
@@ -44,6 +54,7 @@
     void (async () => {
       try {
         crossValidation = null;
+        link.reset();
         detail = await getModel(mid);
         // Reset axis pickers to the canonical pair for the loaded model.
         const a = detail.diagnostics?.n_components ?? 0;
@@ -77,12 +88,26 @@
     return sel === 'seq' ? 'Sequence order' : axis(d, sel);
   }
 
-  /** Options for an axis dropdown: "Seq" first, then each component. */
-  function axisOptions(d: ModelDiagnostics): { value: AxisSel; label: string }[] {
-    return [
+  const selToStr = (s: AxisSel): string => (s === 'seq' ? 'seq' : String(s));
+  const strToSel = (v: string): AxisSel => (v === 'seq' ? 'seq' : Number(v));
+
+  /** Axis drop-down wiring for a scatter: "Seq" first, then each component. */
+  function axisControl(
+    d: ModelDiagnostics,
+    x: AxisSel,
+    y: AxisSel,
+    set: (x: AxisSel, y: AxisSel) => void
+  ): AxisControl {
+    const options = [
       { value: 'seq', label: 'Seq' },
-      ...d.component_names.map((_, c) => ({ value: c as AxisSel, label: axis(d, c) }))
+      ...d.component_names.map((_, c) => ({ value: selToStr(c), label: axis(d, c) }))
     ];
+    return {
+      options,
+      x: selToStr(x),
+      y: selToStr(y),
+      onchange: (nx, ny) => set(strToSel(nx), strToSel(ny))
+    };
   }
 
   function scoreAt(d: ModelDiagnostics, sel: AxisSel, row: number): number {
@@ -93,37 +118,70 @@
     return sel === 'seq' ? row + 1 : (d.x_loadings.data[row][sel] ?? 0);
   }
 
-  // Scores carry SPE and Hotelling's T2 per point so the hover can show them.
-  function scorePoints(d: ModelDiagnostics): ScatterPoint[] {
-    return d.scores.data.map((_, i) => [
-      scoreAt(d, scoresX, i),
-      scoreAt(d, scoresY, i),
-      d.scores.observation_names[i],
-      d.spe[i],
-      d.hotellings_t2[i]
-    ]);
+  // Scores carry SPE and Hotelling's T2 per point so the hover can show them;
+  // each point is keyed by its observation name for row-wise linking.
+  function scorePoints(d: ModelDiagnostics): ScorePt[] {
+    return d.scores.data.map((_, i) => ({
+      rowId: d.scores.observation_names[i],
+      label: d.scores.observation_names[i],
+      x: scoreAt(d, scoresX, i),
+      y: scoreAt(d, scoresY, i),
+      spe: d.spe[i],
+      t2: d.hotellings_t2[i]
+    }));
   }
 
-  function loadingPoints(d: ModelDiagnostics): ScatterPoint[] {
-    return d.x_loadings.data.map((_, i) => [
-      loadAt(d, loadingsX, i),
-      loadAt(d, loadingsY, i),
-      d.x_loadings.variable_names[i]
-    ]);
+  function loadingPoints(d: ModelDiagnostics): PlotPoint[] {
+    return d.x_loadings.data.map((_, i) => ({
+      colId: d.x_loadings.variable_names[i],
+      label: d.x_loadings.variable_names[i],
+      x: loadAt(d, loadingsX, i),
+      y: loadAt(d, loadingsY, i)
+    }));
   }
 
-  function vipPair(d: ModelDiagnostics): { names: string[]; values: number[] } {
+  // One-component plots: one value per observation / variable on a category axis.
+  function scoreBars(d: ModelDiagnostics): PlotPoint[] {
+    return d.scores.observation_names.map((name, i) => ({
+      rowId: name,
+      x: name,
+      y: d.scores.data[i][0]
+    }));
+  }
+
+  function loadingBars(d: ModelDiagnostics): PlotPoint[] {
+    return d.x_loadings.variable_names.map((name, i) => ({
+      colId: name,
+      x: name,
+      y: d.x_loadings.data[i][0]
+    }));
+  }
+
+  function barsFrom(names: string[], values: number[], dim: 'row' | 'col'): PlotPoint[] {
+    return names.map((name, i) => ({
+      [dim === 'row' ? 'rowId' : 'colId']: name,
+      x: name,
+      y: values[i]
+    }));
+  }
+
+  function vipPoints(d: ModelDiagnostics): PlotPoint[] {
     const names = Object.keys(d.vip);
-    return { names, values: names.map((n) => d.vip[n]) };
+    return barsFrom(names, names.map((n) => d.vip[n]), 'col');
   }
 
-  function scoreValues(d: ModelDiagnostics): number[] {
-    return d.scores.data.map((r) => r[0]);
+  function ellipseOverlay(d: ModelDiagnostics): OverlayLine[] {
+    if (!d.ellipse_x?.length) return [];
+    return [{ points: d.ellipse_x.map((x, i): [number, number] => [x, d.ellipse_y[i]]), color: '#c53030', dashed: true }];
   }
 
-  function loadingValues(d: ModelDiagnostics): number[] {
-    return d.x_loadings.data.map((r) => r[0]);
-  }
+  const scoreTooltip = (d: ModelDiagnostics) => (p: PlotPoint) => {
+    const q = p as ScorePt;
+    let html = `${p.label ?? ''}<br/>${axisName(d, scoresX)}: ${fmtNum(p.x as number)}<br/>${axisName(d, scoresY)}: ${fmtNum(p.y)}`;
+    if (q.spe != null) html += `<br/>SPE: ${fmtNum(q.spe)}`;
+    if (q.t2 != null) html += `<br/>Hotelling's T²: ${fmtNum(q.t2)}`;
+    return html;
+  };
 
   function preprocessingSummary(p: Record<string, unknown>): string {
     const x = (p.x_columns as string[] | undefined)?.length ?? 0;
@@ -157,6 +215,12 @@
   const onScoreActivate = (a: ChartActivation) => openContribution(a.dataIndex, 't2');
   const onT2Activate = (a: ChartActivation) => openContribution(a.dataIndex, 't2');
   const onSpeActivate = (a: ChartActivation) => openContribution(a.dataIndex, 'spe');
+
+  // Issue #62: double-click / long-press a loadings point opens that variable's
+  // raw data; the selected rows carry over and stay highlighted there.
+  function openVariableRaw(d: ModelDiagnostics, dataIndex: number): void {
+    rawVariable = d.x_loadings.variable_names[dataIndex];
+  }
 </script>
 
 <svelte:head><title>{pageTitle}</title></svelte:head>
@@ -198,7 +262,19 @@
       {@const d = detail.diagnostics}
       {@const oneComponent = d.n_components < 2}
       <section class="diagnostics" data-testid="diagnostics">
-        <p class="hint">Double-click or long-press a point on the scores, T², or SPE plot to see its contribution plot.</p>
+        <p class="hint">
+          Double-click or long-press a point on the scores, T², or SPE plot to see its contribution
+          plot. Use the arrow or lasso tools on the scores and loadings plots to select points; the
+          selection is highlighted across every plot.
+        </p>
+        {#if link.size > 0}
+          <p class="selection">
+            <strong>{link.size}</strong> selected
+            ({link.rows.size} row{link.rows.size === 1 ? '' : 's'},
+            {link.cols.size} column{link.cols.size === 1 ? '' : 's'})
+            <button type="button" onclick={() => link.reset()}>Clear</button>
+          </p>
+        {/if}
         {#if oneComponent}
           <div class="chart-kind">
             <label>
@@ -216,32 +292,28 @@
           <div class="card">
             <h3>Scores (with T² limit)</h3>
             {#if oneComponent}
-              <Chart
-                option={oneComponentOption(d.scores.observation_names, scoreValues(d), axis(d, 0), oneAxisKind, 'observation')}
+              <BarPlot
+                points={scoreBars(d)}
+                kind={oneAxisKind}
+                yName={axis(d, 0)}
+                xName="observation"
+                limits={[BASELINE]}
+                {link}
+                linkBy="row"
                 onactivate={onScoreActivate}
               />
             {:else}
               {@const canonical = scoresX === 0 && scoresY === 1}
-              <div class="axis-pick">
-                <label>X
-                  <select bind:value={scoresX}>
-                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
-                  </select>
-                </label>
-                <label>Y
-                  <select bind:value={scoresY}>
-                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
-                  </select>
-                </label>
-              </div>
-              <Chart
-                option={scoresEllipseOption(
-                  scorePoints(d),
-                  canonical ? d.ellipse_x : [],
-                  canonical ? d.ellipse_y : [],
-                  axisName(d, scoresX),
-                  axisName(d, scoresY)
-                )}
+              <ScatterPlot
+                points={scorePoints(d)}
+                xName={axisName(d, scoresX)}
+                yName={axisName(d, scoresY)}
+                overlays={canonical ? ellipseOverlay(d) : []}
+                axes={axisControl(d, scoresX, scoresY, (x, y) => { scoresX = x; scoresY = y; })}
+                tooltipHtml={scoreTooltip(d)}
+                {link}
+                linkBy="row"
+                selectable
                 onactivate={onScoreActivate}
               />
             {/if}
@@ -249,40 +321,63 @@
           <div class="card">
             <h3>Loadings</h3>
             {#if oneComponent}
-              <Chart option={oneComponentOption(d.x_loadings.variable_names, loadingValues(d), axis(d, 0), oneAxisKind, 'variable')} />
+              <BarPlot
+                points={loadingBars(d)}
+                kind={oneAxisKind}
+                yName={axis(d, 0)}
+                xName="variable"
+                limits={[BASELINE]}
+                {link}
+                linkBy="col"
+                onactivate={(a) => openVariableRaw(d, a.dataIndex)}
+              />
             {:else}
-              <div class="axis-pick">
-                <label>X
-                  <select bind:value={loadingsX}>
-                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
-                  </select>
-                </label>
-                <label>Y
-                  <select bind:value={loadingsY}>
-                    {#each axisOptions(d) as o (o.value)}<option value={o.value}>{o.label}</option>{/each}
-                  </select>
-                </label>
-              </div>
-              <Chart option={loadingsOption(loadingPoints(d), axisName(d, loadingsX), axisName(d, loadingsY))} />
+              <ScatterPlot
+                points={loadingPoints(d)}
+                xName={axisName(d, loadingsX)}
+                yName={axisName(d, loadingsY)}
+                symbolSize={9}
+                axes={axisControl(d, loadingsX, loadingsY, (x, y) => { loadingsX = x; loadingsY = y; })}
+                {link}
+                linkBy="col"
+                selectable
+                onactivate={(a) => openVariableRaw(d, a.dataIndex)}
+              />
             {/if}
           </div>
           <div class="card">
             <h3>Hotelling's T²</h3>
-            <Chart
-              option={barWithLimitOption(d.scores.observation_names, d.hotellings_t2, d.t2_limit, 'T²')}
+            <BarPlot
+              points={barsFrom(d.scores.observation_names, d.hotellings_t2, 'row')}
+              yName="T²"
+              limits={[{ value: d.t2_limit, label: `limit ${fmtNum(d.t2_limit)}` }]}
+              {link}
+              linkBy="row"
               onactivate={onT2Activate}
             />
           </div>
           <div class="card">
             <h3>SPE (DModX)</h3>
-            <Chart
-              option={barWithLimitOption(d.scores.observation_names, d.spe, d.spe_limit, 'SPE')}
+            <BarPlot
+              points={barsFrom(d.scores.observation_names, d.spe, 'row')}
+              yName="SPE"
+              limits={[{ value: d.spe_limit, label: `limit ${fmtNum(d.spe_limit)}` }]}
+              {link}
+              linkBy="row"
               onactivate={onSpeActivate}
             />
           </div>
           <div class="card wide">
             <h3>VIP</h3>
-            <Chart option={vipOption(vipPair(d).names, vipPair(d).values)} height="260px" />
+            <BarPlot
+              points={vipPoints(d)}
+              yName="VIP"
+              color="#805ad5"
+              limits={[{ value: 1, label: 'VIP 1', dashed: true }]}
+              {link}
+              linkBy="col"
+              height="260px"
+            />
           </div>
           {#if crossValidation}
             {@const cv = crossValidation}
@@ -294,8 +389,16 @@
                 <strong>{cv.recommended}</strong>
                 component{cv.recommended === 1 ? '' : 's'}.
               </p>
-              <Chart
-                option={r2q2Option(cv.component_numbers, cv.r2, cv.q2, cv.target, cv.recommended)}
+              <LinePlot
+                series={[
+                  { name: `R² (${cv.target})`, values: cv.r2, color: '#2b6cb0' },
+                  { name: `Q² (${cv.target}, cross-validated)`, values: cv.q2, color: '#2f855a' }
+                ]}
+                labels={cv.component_numbers}
+                xName="components"
+                yName="cumulative fraction"
+                legend
+                xMarks={[{ value: String(cv.recommended), label: 'recommended' }]}
                 height="280px"
               />
               <table class="r2-table">
@@ -337,6 +440,7 @@
   <ContributionModal
     contributions={contribution}
     metric={contributionMetric}
+    {link}
     onclose={() => (contribution = null)}
     onVariableClick={(v) => (rawVariable = v)}
   />
@@ -346,6 +450,7 @@
   <VariableRawModal
     datasetId={detail.summary.dataset_id}
     column={rawVariable}
+    {link}
     onclose={() => (rawVariable = null)}
   />
 {/if}
@@ -434,21 +539,6 @@
   .chart-kind select {
     padding: 0.2rem;
   }
-  .axis-pick {
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-    margin-bottom: 0.5rem;
-    font-size: 0.85rem;
-  }
-  .axis-pick label {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-  }
-  .axis-pick select {
-    padding: 0.2rem;
-  }
   .card {
     background: #fff;
     border: 1px solid #e6e6e6;
@@ -464,6 +554,26 @@
   }
   .hint {
     color: #777;
+  }
+  .selection {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.85rem;
+    margin: 0 0 0.75rem;
+  }
+  .selection button {
+    padding: 0.15rem 0.6rem;
+    border: 1px solid #c53030;
+    background: #fff;
+    color: #c53030;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .selection button:hover {
+    background: #c53030;
+    color: #fff;
   }
   .r2-table {
     width: 100%;

@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
-  import type { ECharts } from 'echarts';
   import { getVariable, type TransformKind, type VariableInspector } from '$lib/api';
-  import { histogramOption, initChart, sequenceOption } from '$lib/echarts';
+  import { Histogram, LinePlot, fmtNum, type LinkGroup } from '$lib/plots';
 
   interface Props {
     datasetId: string;
@@ -10,6 +8,8 @@
     form?: 'raw' | 'scaled';
     appliedTransform?: TransformKind;
     excludedRows?: number[];
+    /** Shared brushing context: selected rows are highlighted in the sequence plot. */
+    link?: LinkGroup;
     onApplyTransform?: (column: string, transform: TransformKind) => void;
   }
   let {
@@ -18,6 +18,7 @@
     form = 'raw',
     appliedTransform = 'none',
     excludedRows = [],
+    link,
     onApplyTransform
   }: Props = $props();
 
@@ -35,10 +36,30 @@
   let transform = $state<TransformKind>('none');
   let error = $state<string | null>(null);
 
-  let histEl = $state<HTMLDivElement | null>(null);
-  let seqEl = $state<HTMLDivElement | null>(null);
-  let histChart: ECharts | null = null;
-  let seqChart: ECharts | null = null;
+  // Issue #59: label the sequence x-axis by the primary identifier unless the
+  // data is genuinely sequential (a synthetic Row column or a monotonic order).
+  const seqLabels = $derived(
+    info && info.identifiers && !info.is_sequential ? info.identifiers.map((v) => v ?? '') : undefined
+  );
+  // Selected rows (by identifier) become red-square highlights in the sequence.
+  const seqHighlight = $derived.by(() => {
+    if (!info?.identifiers || !link) return [];
+    const out: number[] = [];
+    info.identifiers.forEach((id, i) => {
+      if (id != null && link.hasRow(id)) out.push(i);
+    });
+    return out;
+  });
+  const seqTooltip = $derived.by(() => {
+    const ids = info?.identifiers;
+    if (!ids) return undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (params: any) => {
+      const p = Array.isArray(params) ? params[0] : params;
+      const i = p?.dataIndex ?? 0;
+      return `${ids[i] ?? i + 1}<br/>${column}: ${fmtNum(p?.value)}`;
+    };
+  });
 
   // When the selected column changes, preview the transform already applied to it
   // in the draft spec (so e.g. a log-transformed variable shows transformed).
@@ -63,36 +84,6 @@
         error = (e as Error).message;
       }
     })();
-  });
-
-  $effect(() => {
-    if (!info || !histEl || !seqEl) return;
-    histChart ??= initChart(histEl);
-    seqChart ??= initChart(seqEl);
-    if (info.histogram_counts.length) {
-      histChart.setOption(histogramOption(info.histogram_counts, info.histogram_edges), true);
-    } else {
-      histChart.clear();
-    }
-    seqChart.setOption(sequenceOption(info.sequence), true);
-  });
-
-  // Keep the canvases sized to their container so the plots fit the available
-  // width (e.g. a narrow portrait viewport) without horizontal scrolling.
-  $effect(() => {
-    if (!histEl || !seqEl) return;
-    const observer = new ResizeObserver(() => {
-      histChart?.resize();
-      seqChart?.resize();
-    });
-    observer.observe(histEl);
-    observer.observe(seqEl);
-    return () => observer.disconnect();
-  });
-
-  onDestroy(() => {
-    histChart?.dispose();
-    seqChart?.dispose();
   });
 
   function fmt(value: number | null): string {
@@ -138,10 +129,21 @@
         </button>
       </div>
 
-      <h4>Frequency</h4>
-      <div class="chart" data-testid="hist-chart" bind:this={histEl}></div>
+      {#if info.histogram_counts.length}
+        <h4>Frequency</h4>
+        <div data-testid="hist-chart">
+          <Histogram counts={info.histogram_counts} edges={info.histogram_edges} height="200px" />
+        </div>
+      {/if}
       <h4>Sequence</h4>
-      <div class="chart" bind:this={seqEl}></div>
+      <LinePlot
+        series={[{ values: info.sequence }]}
+        labels={seqLabels}
+        xName={seqLabels ? '' : 'order'}
+        highlight={seqHighlight}
+        tooltipFormatter={seqTooltip}
+        height="200px"
+      />
     {:else}
       <p class="hint">Distribution and transforms apply to quantitative variables.</p>
     {/if}
@@ -179,10 +181,6 @@
   .suggest {
     color: #777;
     font-size: 0.8rem;
-  }
-  .chart {
-    width: 100%;
-    height: 200px;
   }
   h4 {
     margin: 0.5rem 0 0.2rem;

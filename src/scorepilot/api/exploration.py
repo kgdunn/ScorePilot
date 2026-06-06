@@ -27,7 +27,8 @@ from scorepilot.core import (
     variable_summary,
 )
 from scorepilot.core._pandas import column as get_column
-from scorepilot.dataset_store import Dataset
+from scorepilot.core._pandas import to_numeric
+from scorepilot.dataset_store import SYNTHETIC_ID_NAME, Dataset
 from scorepilot.schemas import (
     ColumnQualityModel,
     DuplicateIdentifierModel,
@@ -190,6 +191,26 @@ def _row_identifiers(dataset: Dataset, row_offset: int, count: int) -> list[str 
     return [str(row_offset + i) for i in range(count)]
 
 
+def _is_sequential_identifier(name: str | None, series: pd.Series) -> bool:
+    """Whether the primary identifier is "truly sequential" (issue #59).
+
+    The synthetic ``Row`` counter (and the implicit row index) are sequential, as
+    is any integer identifier that is a constant-step arithmetic run (a row
+    counter under a different name). A labelled identifier is not: its values
+    carry meaning and should be shown rather than collapsed to ``1..n``.
+    """
+    if name is None or name == SYNTHETIC_ID_NAME:
+        return True
+    numeric = to_numeric(series)
+    if bool(numeric.isna().any()):
+        return False
+    values = numeric.astype(float)
+    if len(values) < 2 or not bool((values == values.round()).all()):
+        return False
+    diffs = values.diff().dropna()
+    return bool((diffs == diffs.iloc[0]).all()) and bool(diffs.iloc[0] != 0)
+
+
 @router.get("/{dataset_id}/variables/{column}", response_model=VariableInspector)
 def inspect_variable(
     dataset_id: str,
@@ -240,6 +261,17 @@ def inspect_variable(
     summary = variable_summary(display, column_type=meta.column_type)
     counts, edges = histogram(display)
 
+    # Issue #59: carry the primary identifier per (surviving) row, aligned with
+    # the sequence, plus whether that identifier is genuinely sequential.
+    identifiers: list[str | None]
+    if dataset.primary_id is not None:
+        id_column = get_column(dataset.raw, dataset.primary_id)
+        identifiers = [_format_cell(v) for v in id_column.iloc[active]]
+        is_sequential = _is_sequential_identifier(dataset.primary_id, id_column)
+    else:
+        identifiers = [str(i) for i in active]
+        is_sequential = True
+
     return VariableInspector(
         name=meta.name,
         column_type=meta.column_type,
@@ -260,4 +292,6 @@ def inspect_variable(
         histogram_counts=counts,
         histogram_edges=edges,
         sequence=sequence(display),
+        identifiers=identifiers,
+        is_sequential=is_sequential,
     )

@@ -57,6 +57,11 @@ export interface VariableInspector {
   histogram_counts: number[];
   histogram_edges: number[];
   sequence: (number | null)[];
+  /** Primary-identifier value per row, aligned with `sequence` (issue #59). */
+  identifiers?: (string | null)[];
+  /** Whether the primary identifier is genuinely sequential (synthetic Row or a
+   * monotonic run order); when false, plots label points by the identifier. */
+  is_sequential?: boolean;
 }
 
 export interface ColumnQuality {

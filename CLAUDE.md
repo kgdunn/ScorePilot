@@ -36,10 +36,17 @@ testing models on new data.
   Postgres in production, same interface for both.
 - **`api/`** — FastAPI routers. Thin layer translating HTTP ↔ core/db.
 - **`frontend/`** — SvelteKit (Svelte 5 runes) + Vite, ECharts for all plots.
-  Builds into `src/scorepilot/web`. `frontend/src/lib/grid/` is a standalone,
-  dependency-free, domain-agnostic data grid intended to be reusable in other
-  apps — keep ScorePilot concepts (roles, quality) out of it and layer them on
-  via snippets/props in `Explorer.svelte`.
+  Builds into `src/scorepilot/web`. Two standalone, domain-agnostic, reusable
+  libraries live here and must stay free of ScorePilot concepts (layer those on
+  via props/snippets in the components that consume them):
+  - `frontend/src/lib/grid/` — a dependency-free (Svelte-only) data grid.
+  - `frontend/src/lib/plots/` — a linked-plots collection (depends only on Svelte
+    + ECharts, the rendering primitive). Plots take domain-agnostic `PlotPoint`
+    marks carrying opaque `rowId` / `colId` identities and share a `LinkGroup`
+    for brushing-and-linking (select in one view, highlight in all). Components:
+    `ScatterPlot` / `BarPlot` / `LinePlot` / `Histogram` over a shared
+    `PlotChart` ECharts host. Reserve `color` / `size` / `shape` encoding
+    channels for later. See `plots/README.md`.
 - The packaged app is **one process**: FastAPI serves `/api` and the built
   static frontend at `/`.
 

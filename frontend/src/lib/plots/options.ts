@@ -250,6 +250,8 @@ export interface BarConfig {
   yName?: string;
   xName?: string;
   color?: string;
+  /** Series type: bars (default), or a line / scatter over the same categories. */
+  kind?: 'bar' | 'line' | 'scatter';
   limits?: LimitLine[];
   selectedRows?: ReadonlySet<string>;
   selectedCols?: ReadonlySet<string>;
@@ -274,31 +276,41 @@ function limitMarkLine(limits: LimitLine[]) {
   };
 }
 
-/** A categorical bar chart from `PlotPoint`s (x = category, y = value). Selected
- * bars get a red outline so bar plots participate in linking too. */
+/** A categorical plot from `PlotPoint`s (x = category, y = value): bars by
+ * default, or a line / scatter over the same categories. Selected marks get a
+ * red outline so these plots participate in linking too. */
 export function barOption(cfg: BarConfig): EChartsOption {
   const {
     points,
     yName = '',
     xName = '',
     color = PRIMARY,
+    kind = 'bar',
     limits = [],
     selectedRows = new Set<string>(),
     selectedCols = new Set<string>(),
     linkBy = 'row'
   } = cfg;
   const names = points.map((p) => String(p.x));
+  const anySelected = points.some((p) => isSelected(p, linkBy, selectedRows, selectedCols));
   const data = points.map((p) => {
     const sel = isSelected(p, linkBy, selectedRows, selectedCols);
-    return {
-      value: p.y,
-      itemStyle: sel ? { color, borderColor: SELECT_BORDER, borderWidth: 2 } : { color }
-    };
+    const style = sel ? { color, borderColor: SELECT_BORDER, borderWidth: 2 } : { color };
+    return kind === 'bar'
+      ? { value: p.y, itemStyle: style }
+      : { value: p.y, itemStyle: style, symbol: sel ? 'rect' : 'circle', symbolSize: sel ? 13 : 9 };
   });
+  const series =
+    kind === 'bar'
+      ? { type: 'bar' as const, data }
+      : kind === 'line'
+        ? { type: 'line' as const, data, showSymbol: anySelected, symbolSize: 9, lineStyle: { color } }
+        : { type: 'scatter' as const, data, symbolSize: 9 };
   return {
+    animation: kind === 'bar',
     grid: { left: 56, right: 16, top: 24, bottom: xName ? 56 : 48 },
     dataZoom: wheelZoom(),
-    tooltip: { trigger: 'axis', valueFormatter: (v) => fmtNum(v as number) },
+    tooltip: { trigger: kind === 'scatter' ? 'item' : 'axis', valueFormatter: (v) => fmtNum(v as number) },
     xAxis: {
       type: 'category',
       data: names,
@@ -308,7 +320,7 @@ export function barOption(cfg: BarConfig): EChartsOption {
       axisLabel: categoryAxisLabel
     },
     yAxis: { type: 'value', name: yName, scale: true },
-    series: [{ type: 'bar', data, markLine: limitMarkLine(limits) }]
+    series: [{ ...series, markLine: limitMarkLine(limits) }]
   };
 }
 
@@ -330,6 +342,8 @@ export interface LineConfig {
   showSymbol?: boolean;
   legend?: boolean;
   limits?: LimitLine[];
+  /** Vertical reference lines at given x categories (e.g. a recommended count). */
+  xMarks?: { value: string | number; label?: string; color?: string; dashed?: boolean }[];
   /** Indices of points to mark as selected (red squares), for the active series. */
   highlight?: number[];
   /** Optional tooltip override (e.g. to show an identifier per x). */
@@ -349,6 +363,7 @@ export function lineOption(cfg: LineConfig): EChartsOption {
     showSymbol = false,
     legend = false,
     limits = [],
+    xMarks = [],
     highlight = [],
     tooltipFormatter
   } = cfg;
@@ -356,6 +371,18 @@ export function lineOption(cfg: LineConfig): EChartsOption {
   const xData = labels ?? Array.from({ length: n }, (_, i) => i + 1);
   const palette = [PRIMARY, '#2f855a', '#805ad5', '#dd6b20'];
   const hi = new Set(highlight);
+  const markLineData = [
+    ...limits.map((l) => ({
+      yAxis: l.value,
+      lineStyle: { color: l.color ?? SELECT_BORDER, type: l.dashed ? ('dashed' as const) : ('solid' as const) },
+      label: { position: 'insideEndTop' as const, color: l.color ?? SELECT_BORDER, fontSize: 10, formatter: () => l.label ?? fmtNum(l.value) }
+    })),
+    ...xMarks.map((m) => ({
+      xAxis: m.value,
+      lineStyle: { color: m.color ?? '#dd6b20', type: m.dashed ? ('dashed' as const) : ('solid' as const) },
+      label: { position: 'insideEndTop' as const, color: m.color ?? '#dd6b20', fontSize: 10, formatter: () => m.label ?? '' }
+    }))
+  ];
   return {
     animation: false,
     grid: { left: 56, right: 16, top: legend ? 36 : 16, bottom: xName ? 44 : 40 },
@@ -387,7 +414,7 @@ export function lineOption(cfg: LineConfig): EChartsOption {
       symbolSize: 7,
       lineStyle: { color: s.color ?? palette[si % palette.length] },
       itemStyle: { color: s.color ?? palette[si % palette.length] },
-      markLine: si === 0 ? limitMarkLine(limits) : undefined
+      markLine: si === 0 && markLineData.length ? { silent: true, symbol: 'none', data: markLineData } : undefined
     }))
   };
 }
