@@ -320,6 +320,64 @@ def test_fit_model_hangar_and_logbook(client: TestClient) -> None:
     assert [s["id"] for s in v["lineage"]] == [model_id, v["summary"]["id"]]
 
 
+def _fit_model(client: TestClient, dataset_id: str) -> int:
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 2}
+    )
+    assert created.status_code == 201, created.text
+    return created.json()["summary"]["id"]
+
+
+def test_variant_excludes_selected_observations(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    model_id = _fit_model(client, dataset_id)
+
+    resp = client.post(
+        f"/api/models/{model_id}/variant",
+        json={"observations": ["obs0", "obs1"], "mode": "exclude"},
+    )
+    assert resp.status_code == 201, resp.text
+    variant = resp.json()
+    assert variant["summary"]["parent_id"] == model_id
+    assert sorted(variant["excluded_samples"]) == [0, 1]
+    names = variant["diagnostics"]["scores"]["observation_names"]
+    assert len(names) == 28
+    assert "obs0" not in names and "obs1" not in names
+
+
+def test_variant_keep_only_selected_observations(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    model_id = _fit_model(client, dataset_id)
+
+    resp = client.post(
+        f"/api/models/{model_id}/variant",
+        json={"observations": ["obs0", "obs1", "obs2"], "mode": "keep"},
+    )
+    assert resp.status_code == 201, resp.text
+    variant = resp.json()
+    assert sorted(variant["diagnostics"]["scores"]["observation_names"]) == ["obs0", "obs1", "obs2"]
+    assert len(variant["excluded_samples"]) == 27
+
+
+def test_variant_excludes_selected_variables(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    model_id = _fit_model(client, dataset_id)
+
+    resp = client.post(
+        f"/api/models/{model_id}/variant",
+        json={"variables": ["v0"], "mode": "exclude"},
+    )
+    assert resp.status_code == 201, resp.text
+    variant = resp.json()
+    assert variant["preprocessing"]["excluded_columns"] == ["v0"]
+    assert "v0" not in variant["diagnostics"]["x_loadings"]["variable_names"]
+
+
+def test_variant_unknown_model_is_404(client: TestClient) -> None:
+    resp = client.post("/api/models/9999/variant", json={"observations": ["obs0"]})
+    assert resp.status_code == 404
+
+
 def test_model_contributions(client: TestClient) -> None:
     dataset_id = _upload_csv(client)["dataset_id"]
     created = client.post(

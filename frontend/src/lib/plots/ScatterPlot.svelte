@@ -77,6 +77,12 @@
     }
   }
 
+  // The most recent enclosed points while a lasso is being drawn. ECharts
+  // auto-closes the polygon (last vertex -> first), so even a partial ring is a
+  // closed shape - forgiving on touch, where you can never trace exactly back to
+  // the start. Committed on release (brushEnd), per "select by the end".
+  let lassoSelected: number[] = [];
+
   function onReady(c: ECharts): void {
     chart = c;
     // Arrow mode: single click toggles a point's membership.
@@ -85,15 +91,22 @@
       if (mode !== 'arrow' || p?.componentType !== 'series' || p.seriesIndex !== 0) return;
       if (p.dataIndex != null) selectIndices([p.dataIndex], true);
     });
-    // Lasso mode: ECharts brush emits the enclosed points; add them, then wipe
-    // the rubber-band so only the red-square markers remain.
+    // Track the enclosed points as the lasso is drawn. ECharts emits this on
+    // every move (it does not emit a final one on mouse-up), so the last value
+    // here is the closed-polygon selection at release.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     c.on('brushSelected', (params: any) => {
       const area = (params.batch ?? [])[0];
       const hit = (area?.selected ?? []).find((s: { seriesIndex: number }) => s.seriesIndex === 0);
-      if (hit?.dataIndex?.length) selectIndices(hit.dataIndex);
+      lassoSelected = hit?.dataIndex ?? [];
     });
-    c.on('brushEnd', () => c.dispatchAction({ type: 'brush', command: 'clear', areas: [] }));
+    // On release, commit whatever the closed loop enclosed, then wipe the
+    // rubber-band so only the red-square markers remain.
+    c.on('brushEnd', () => {
+      if (lassoSelected.length) selectIndices(lassoSelected);
+      lassoSelected = [];
+      c.dispatchAction({ type: 'brush', command: 'clear', areas: [] });
+    });
   }
 
   // Toggle ECharts' global brush cursor to match the chosen mode.

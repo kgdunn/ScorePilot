@@ -171,7 +171,15 @@ export function scatterOption(cfg: ScatterConfig): EChartsOption {
     tooltipHtml
   } = cfg;
 
-  const data = points.map((p) => ({ value: [p.x, p.y], name: p.label }));
+  // Per-point encoding channels (colour / size / shape). Each is optional and
+  // overrides the series default only when the caller sets it on the PlotPoint.
+  const data = points.map((p) => {
+    const item: Record<string, unknown> = { value: [p.x, p.y], name: p.label };
+    if (p.color != null) item.itemStyle = { color: p.color };
+    if (p.size != null) item.symbolSize = p.size;
+    if (p.shape != null) item.symbol = p.shape === 'square' ? 'rect' : p.shape;
+    return item;
+  });
   const selected = points.filter((p) => isSelected(p, linkBy, selectedRows, selectedCols));
   const selData = selected.map((p) => [p.x, p.y]);
 
@@ -235,8 +243,11 @@ export function scatterOption(cfg: ScatterConfig): EChartsOption {
       yAxisIndex: 0,
       seriesIndex: 0,
       brushStyle: LASSO_STYLE,
-      throttleType: 'debounce',
-      throttleDelay: 80,
+      // No throttle: ECharts does not emit a final `brush` on mouse-up (only
+      // `brushEnd`), so the last `brushSelected` must land synchronously before
+      // we read it on release - otherwise a quick touch lasso selects nothing.
+      throttleType: 'fixRate',
+      throttleDelay: 0,
       removeOnClick: false
     };
   }

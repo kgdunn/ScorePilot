@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from dataclasses import replace
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, status
@@ -31,6 +32,7 @@ from scorepilot.schemas import (
     ModelSummary,
     PCAFitResponse,
     ScoresPayload,
+    VariantRequest,
 )
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -79,6 +81,27 @@ def _observation_names(dataset: Dataset, applied: AppliedWorkset) -> list[str]:
         ids = get_column(dataset.raw, dataset.primary_id)
         return [_format_identifier(ids.iloc[p]) for p in positions]
     return [str(p) for p in positions]
+
+
+def _positions_for_identifiers(dataset: Dataset, names: set[str]) -> set[int]:
+    """Raw-dataset row positions whose primary identifier is in ``names``.
+
+    ``names`` are the labels carried by the plots' selection - primary-identifier
+    values formatted exactly as :func:`_observation_names` produces them, so the
+    match is consistent. With no primary identifier the labels are row positions.
+    """
+    if not names:
+        return set()
+    if dataset.primary_id is None:
+        positions: set[int] = set()
+        for n in names:
+            try:
+                positions.add(int(n))
+            except ValueError:
+                continue
+        return {p for p in positions if 0 <= p < len(dataset.raw)}
+    ids = get_column(dataset.raw, dataset.primary_id)
+    return {i for i, v in enumerate(ids) if _format_identifier(v) in names}
 
 
 def _run_fit(
@@ -208,6 +231,70 @@ def fit_model_endpoint(
         summary=_summary(model),
         preprocessing=spec.to_dict(),
         excluded_samples=list(spec.excluded_rows),
+        lineage=[_summary(m) for m in repository.lineage(model.id)],
+        diagnostics=_diagnostics_model(diag),
+    )
+
+
+@router.post("/{model_id}/variant", response_model=ModelDetail, status_code=status.HTTP_201_CREATED)
+def create_variant(
+    model_id: int, request: VariantRequest, store: DatasetStoreDep, repository: RepositoryDep
+) -> ModelDetail:
+    """Fork a child variant from a brushed selection of points.
+
+    Copies the parent's preprocessing recipe and adds exclusions derived from the
+    selection (exclude the selected rows/variables, or keep only the selected
+    rows), then refits and persists the result with ``parent_id`` set so the
+    lineage is preserved.
+    """
+    parent = repository.get(model_id)
+    if parent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown model id: {model_id}"
+        )
+    dataset = store.get(parent.dataset_id) if parent.dataset_id else None
+    if dataset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source dataset is no longer loaded; cannot create a variant.",
+        )
+
+    spec = PreprocessingSpec.from_dict(parent.preprocessing)
+    existing_rows = set(spec.excluded_rows)
+    selected = _positions_for_identifiers(dataset, set(request.observations))
+    if request.mode == "keep":
+        active = (i for i in range(len(dataset.raw)) if i not in existing_rows)
+        new_rows = existing_rows | {i for i in active if i not in selected}
+        new_cols = spec.excluded_columns
+    else:
+        new_rows = existing_rows | selected
+        new_cols = tuple(sorted(set(spec.excluded_columns) | set(request.variables)))
+    new_spec = replace(spec, excluded_rows=tuple(sorted(new_rows)), excluded_columns=new_cols)
+
+    try:
+        diag = _run_fit(dataset, new_spec, parent.kind, parent.n_components, 0.95)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+
+    base_name = parent.name or f"Model {parent.id}"
+    model = repository.add(
+        Model(
+            kind=parent.kind,
+            name=request.name or f"{base_name} (variant)",
+            dataset_id=dataset.id,
+            n_components=diag.n_components,
+            preprocessing=new_spec.to_dict(),
+            excluded_samples=list(new_spec.excluded_rows),
+            params=_pack_params(diag),
+            parent_id=parent.id,
+        )
+    )
+    return ModelDetail(
+        summary=_summary(model),
+        preprocessing=new_spec.to_dict(),
+        excluded_samples=list(new_spec.excluded_rows),
         lineage=[_summary(m) for m in repository.lineage(model.id)],
         diagnostics=_diagnostics_model(diag),
     )

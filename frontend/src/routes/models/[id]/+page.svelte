@@ -1,6 +1,8 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import {
+    createVariant,
     getContributions,
     getCrossValidation,
     getModel,
@@ -40,6 +42,37 @@
   // Shared brushing context for this model's plots: a selection made in the
   // scores plot (rows) or loadings plot (columns) is highlighted everywhere.
   const link = createLinkGroup();
+
+  // Issue #73: encode a per-observation metric onto the scores points' colour
+  // and/or size, to surface outliers at a glance.
+  type Channel = 'none' | 'spe' | 't2';
+  let colorBy = $state<Channel>('none');
+  let sizeBy = $state<Channel>('none');
+
+  const channelLabel = (ch: Channel): string =>
+    ch === 'spe' ? 'SPE' : ch === 't2' ? "Hotelling's T²" : '';
+  function metricArray(d: ModelDiagnostics, ch: Channel): number[] | null {
+    if (ch === 'spe') return d.spe;
+    if (ch === 't2') return d.hotellings_t2;
+    return null;
+  }
+  function extent(xs: number[]): [number, number] {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const x of xs) {
+      if (x < lo) lo = x;
+      if (x > hi) hi = x;
+    }
+    return [lo, hi];
+  }
+  const norm = (v: number, lo: number, hi: number): number => (hi > lo ? (v - lo) / (hi - lo) : 0.5);
+  // Blue (#2b6cb0) -> red (#c53030) ramp; matches the CSS gradient in the legend.
+  function ramp(t: number): string {
+    const a = [43, 108, 176];
+    const b = [197, 48, 48];
+    const c = a.map((av, i) => Math.round(av + (b[i] - av) * Math.max(0, Math.min(1, t))));
+    return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+  }
   // Axis selection for the scores/loadings scatters: a component index, or 'seq'
   // for the data's sequence (observation/variable) order.
   type AxisSel = number | 'seq';
@@ -121,14 +154,23 @@
   // Scores carry SPE and Hotelling's T2 per point so the hover can show them;
   // each point is keyed by its observation name for row-wise linking.
   function scorePoints(d: ModelDiagnostics): ScorePt[] {
-    return d.scores.data.map((_, i) => ({
-      rowId: d.scores.observation_names[i],
-      label: d.scores.observation_names[i],
-      x: scoreAt(d, scoresX, i),
-      y: scoreAt(d, scoresY, i),
-      spe: d.spe[i],
-      t2: d.hotellings_t2[i]
-    }));
+    const colorVals = metricArray(d, colorBy);
+    const sizeVals = metricArray(d, sizeBy);
+    const cExt = colorVals ? extent(colorVals) : null;
+    const sExt = sizeVals ? extent(sizeVals) : null;
+    return d.scores.data.map((_, i) => {
+      const pt: ScorePt = {
+        rowId: d.scores.observation_names[i],
+        label: d.scores.observation_names[i],
+        x: scoreAt(d, scoresX, i),
+        y: scoreAt(d, scoresY, i),
+        spe: d.spe[i],
+        t2: d.hotellings_t2[i]
+      };
+      if (colorVals && cExt) pt.color = ramp(norm(colorVals[i], cExt[0], cExt[1]));
+      if (sizeVals && sExt) pt.size = 8 + 16 * norm(sizeVals[i], sExt[0], sExt[1]);
+      return pt;
+    });
   }
 
   function loadingPoints(d: ModelDiagnostics): PlotPoint[] {
@@ -221,6 +263,27 @@
   function openVariableRaw(d: ModelDiagnostics, dataIndex: number): void {
     rawVariable = d.x_loadings.variable_names[dataIndex];
   }
+
+  // Issue #72: act on the current selection by forking a child variant (exclude
+  // the selected rows/variables, or keep only the selected rows), then open it.
+  let variantBusy = $state(false);
+  async function makeVariant(mode: 'exclude' | 'keep', useRows: boolean, useCols: boolean) {
+    if (variantBusy) return;
+    variantBusy = true;
+    try {
+      const created = await createVariant(id, {
+        mode,
+        observations: useRows ? [...link.rows] : [],
+        variables: useCols ? [...link.cols] : []
+      });
+      link.reset();
+      await goto(`/models/${created.summary.id}`);
+    } catch (e) {
+      showError((e as Error).message);
+    } finally {
+      variantBusy = false;
+    }
+  }
 </script>
 
 <svelte:head><title>{pageTitle}</title></svelte:head>
@@ -268,12 +331,26 @@
           selection is highlighted across every plot.
         </p>
         {#if link.size > 0}
-          <p class="selection">
-            <strong>{link.size}</strong> selected
-            ({link.rows.size} row{link.rows.size === 1 ? '' : 's'},
-            {link.cols.size} column{link.cols.size === 1 ? '' : 's'})
-            <button type="button" onclick={() => link.reset()}>Clear</button>
-          </p>
+          <div class="selection">
+            <span>
+              <strong>{link.size}</strong> selected
+              ({link.rows.size} row{link.rows.size === 1 ? '' : 's'},
+              {link.cols.size} column{link.cols.size === 1 ? '' : 's'})
+            </span>
+            {#if link.rows.size > 0}
+              <button type="button" disabled={variantBusy} onclick={() => makeVariant('exclude', true, link.cols.size > 0)}>
+                Exclude selected → new variant
+              </button>
+              <button type="button" disabled={variantBusy} onclick={() => makeVariant('keep', true, false)}>
+                Keep only selected rows → new variant
+              </button>
+            {:else if link.cols.size > 0}
+              <button type="button" disabled={variantBusy} onclick={() => makeVariant('exclude', false, true)}>
+                Exclude selected variables → new variant
+              </button>
+            {/if}
+            <button type="button" class="clear" onclick={() => link.reset()}>Clear</button>
+          </div>
         {/if}
         {#if oneComponent}
           <div class="chart-kind">
@@ -304,6 +381,30 @@
               />
             {:else}
               {@const canonical = scoresX === 0 && scoresY === 1}
+              <div class="encode">
+                <label>Color by
+                  <select bind:value={colorBy}>
+                    <option value="none">None</option>
+                    <option value="spe">SPE</option>
+                    <option value="t2">Hotelling's T²</option>
+                  </select>
+                </label>
+                <label>Size by
+                  <select bind:value={sizeBy}>
+                    <option value="none">None</option>
+                    <option value="spe">SPE</option>
+                    <option value="t2">Hotelling's T²</option>
+                  </select>
+                </label>
+                {#if colorBy !== 'none'}
+                  {@const ext = extent(metricArray(d, colorBy) ?? [0, 1])}
+                  <span class="legend">
+                    {channelLabel(colorBy)}: {fmtNum(ext[0])}
+                    <span class="ramp"></span>
+                    {fmtNum(ext[1])}
+                  </span>
+                {/if}
+              </div>
               <ScatterPlot
                 points={scorePoints(d)}
                 xName={axisName(d, scoresX)}
@@ -539,6 +640,36 @@
   .chart-kind select {
     padding: 0.2rem;
   }
+  .encode {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+    font-size: 0.82rem;
+    color: #555;
+  }
+  .encode label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .encode select {
+    padding: 0.15rem;
+  }
+  .encode .legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .encode .ramp {
+    display: inline-block;
+    width: 70px;
+    height: 10px;
+    border-radius: 2px;
+    /* Matches ramp() in the script: blue -> red. */
+    background: linear-gradient(to right, #2b6cb0, #c53030);
+  }
   .card {
     background: #fff;
     border: 1px solid #e6e6e6;
@@ -559,19 +690,32 @@
     display: flex;
     align-items: center;
     gap: 0.6rem;
+    flex-wrap: wrap;
     font-size: 0.85rem;
     margin: 0 0 0.75rem;
   }
   .selection button {
-    padding: 0.15rem 0.6rem;
-    border: 1px solid #c53030;
-    background: #fff;
-    color: #c53030;
+    padding: 0.2rem 0.7rem;
+    border: 1px solid #2b6cb0;
+    background: #2b6cb0;
+    color: #fff;
     border-radius: 5px;
     cursor: pointer;
     font-size: 0.8rem;
   }
   .selection button:hover {
+    background: #245a96;
+  }
+  .selection button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .selection button.clear {
+    border-color: #c53030;
+    background: #fff;
+    color: #c53030;
+  }
+  .selection button.clear:hover {
     background: #c53030;
     color: #fff;
   }
