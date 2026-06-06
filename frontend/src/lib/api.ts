@@ -357,6 +357,30 @@ export async function getCrossValidation(modelId: number): Promise<CrossValidati
   return asJson(await fetch(`/api/models/${modelId}/cross-validation`));
 }
 
+export interface VariantRequest {
+  /** Primary-identifier values of selected observations. */
+  observations?: string[];
+  /** Selected variable (column) names. */
+  variables?: string[];
+  /** Exclude the selection, or keep only the selected observations. */
+  mode?: 'exclude' | 'keep';
+  name?: string;
+}
+
+/** Fork a child model variant from a brushed selection (excludes / keep-only). */
+export async function createVariant(
+  modelId: number,
+  body: VariantRequest
+): Promise<ModelDetail> {
+  return asJson(
+    await fetch(`/api/models/${modelId}/variant`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+  );
+}
+
 /** The running backend version, shown in the UI so you can confirm the deploy. */
 export async function getVersion(): Promise<string> {
   const body = await asJson<{ version: string }>(await fetch('/api/version'));
