@@ -1,7 +1,6 @@
 <script lang="ts">
-  import type { ECharts } from 'echarts';
   import { fitPca, uploadDataset, type DatasetDetail, type PCAFitResponse } from '$lib/api';
-  import { initChart, scoresScatterOption, type ScorePoint } from '$lib/echarts';
+  import { ScatterPlot, type PlotPoint } from '$lib/plots';
 
   let file = $state<File | null>(null);
   let dataset = $state<DatasetDetail | null>(null);
@@ -9,9 +8,6 @@
   let result = $state<PCAFitResponse | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
-
-  let chartEl = $state<HTMLDivElement | null>(null);
-  let chart: ECharts | null = null;
 
   function onFileChange(event: Event) {
     const input = event.target as HTMLInputElement;
@@ -53,21 +49,18 @@
     return (fit.r2_cumulative[i] - prev) * 100;
   }
 
-  $effect(() => {
-    if (!result || !chartEl) return;
-    chart ??= initChart(chartEl);
-    const fit = result;
-    const points: ScorePoint[] = fit.scores.data.map((row, i) => [
-      row[0],
-      row[1] ?? 0,
-      fit.scores.observation_names[i]
-    ]);
-    const x = `${fit.component_names[0]} (${pct(fit, 0).toFixed(1)}%)`;
-    const y = fit.component_names[1] ? `${fit.component_names[1]} (${pct(fit, 1).toFixed(1)}%)` : 'PC2';
-    chart.setOption(scoresScatterOption(points, x, y), true);
-  });
-
-  $effect(() => () => chart?.dispose());
+  function scorePoints(fit: PCAFitResponse): PlotPoint[] {
+    return fit.scores.data.map((row, i) => ({
+      rowId: fit.scores.observation_names[i],
+      label: fit.scores.observation_names[i],
+      x: row[0],
+      y: row[1] ?? 0
+    }));
+  }
+  const xName = $derived(result ? `${result.component_names[0]} (${pct(result, 0).toFixed(1)}%)` : '');
+  const yName = $derived(
+    result && result.component_names[1] ? `${result.component_names[1]} (${pct(result, 1).toFixed(1)}%)` : 'PC2'
+  );
 </script>
 
 <main>
@@ -97,7 +90,7 @@
   {#if result}
     <section class="panel">
       <h2>Scores</h2>
-      <div class="chart" bind:this={chartEl}></div>
+      <ScatterPlot points={scorePoints(result)} {xName} {yName} height="460px" />
     </section>
   {/if}
 </main>
@@ -154,9 +147,5 @@
   .error {
     color: #b3261e;
     font-weight: 600;
-  }
-  .chart {
-    width: 100%;
-    height: 460px;
   }
 </style>

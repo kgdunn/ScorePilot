@@ -10,6 +10,8 @@
     xName?: string;
     color?: string;
     height?: string;
+    /** Series type: bars (default), or a line / scatter over the same categories. */
+    kind?: 'bar' | 'line' | 'scatter';
     limits?: LimitLine[];
     /** Shared brushing context; selected bars are outlined in red. */
     link?: LinkGroup;
@@ -23,6 +25,7 @@
     xName = '',
     color,
     height = '320px',
+    kind = 'bar',
     limits = [],
     link,
     linkBy = 'row',
@@ -36,6 +39,7 @@
       yName,
       xName,
       color,
+      kind,
       limits,
       selectedRows: link?.rows,
       selectedCols: link?.cols,

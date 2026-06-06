@@ -1,20 +1,24 @@
 <script lang="ts">
   import type { Contributions } from '$lib/api';
-  import { oneComponentOption } from '$lib/echarts';
-  import Chart from './Chart.svelte';
+  import { BarPlot, type LinkGroup, type PlotPoint } from '$lib/plots';
 
   interface Props {
     contributions: Contributions;
     /** Which diagnostic the contributions explain. */
     metric: 't2' | 'spe';
     onclose: () => void;
+    /** Shared brushing context, so selected variables stay highlighted here. */
+    link?: LinkGroup;
     /** Fired when a contribution bar is clicked, with that variable's name. */
     onVariableClick?: (variable: string) => void;
   }
-  let { contributions, metric, onclose, onVariableClick }: Props = $props();
+  let { contributions, metric, onclose, link, onVariableClick }: Props = $props();
 
   const label = $derived(metric === 'spe' ? 'SPE' : "Hotelling's T²");
   const values = $derived(metric === 'spe' ? contributions.spe : contributions.t2);
+  const points = $derived<PlotPoint[]>(
+    contributions.variable_names.map((name, i) => ({ colId: name, x: name, y: values[i] }))
+  );
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') onclose();
@@ -42,8 +46,12 @@
       Per-variable contribution of this observation to its {label}. Click a bar to
       see that variable's raw data.
     </p>
-    <Chart
-      option={oneComponentOption(contributions.variable_names, values, `${label} contribution`, 'bar', 'variable')}
+    <BarPlot
+      {points}
+      yName={`${label} contribution`}
+      xName="variable"
+      {link}
+      linkBy="col"
       height="340px"
       onitemclick={(a) => onVariableClick?.(contributions.variable_names[a.dataIndex])}
     />

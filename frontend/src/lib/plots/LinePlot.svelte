@@ -13,6 +13,8 @@
     showSymbol?: boolean;
     legend?: boolean;
     limits?: LimitLine[];
+    /** Vertical reference lines at given x categories (e.g. a recommended count). */
+    xMarks?: { value: string | number; label?: string; color?: string; dashed?: boolean }[];
     /** Indices (in the first series) to mark with a red square - e.g. linked rows. */
     highlight?: number[];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -27,12 +29,13 @@
     showSymbol = false,
     legend = false,
     limits = [],
+    xMarks = [],
     highlight = [],
     tooltipFormatter
   }: Props = $props();
 
   const option = $derived(
-    lineOption({ series, labels, xName, yName, showSymbol, legend, limits, highlight, tooltipFormatter })
+    lineOption({ series, labels, xName, yName, showSymbol, legend, limits, xMarks, highlight, tooltipFormatter })
   );
 </script>
 
