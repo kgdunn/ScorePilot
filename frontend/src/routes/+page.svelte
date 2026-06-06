@@ -17,11 +17,14 @@
   let url = $state('');
 
   async function refresh() {
-    try {
-      [datasets, samples] = await Promise.all([listDatasets(), listSamples()]);
-    } catch (e) {
-      showError((e as Error).message);
-    }
+    // Load independently: a failure listing the user's datasets must not also
+    // hide the bundled demo datasets (and vice versa).
+    void listDatasets()
+      .then((d) => (datasets = d))
+      .catch((e) => showError((e as Error).message));
+    void listSamples()
+      .then((s) => (samples = s))
+      .catch((e) => showError((e as Error).message));
   }
 
   $effect(() => {
