@@ -15,6 +15,8 @@
   let samples = $state<SampleInfo[]>([]);
   let busy = $state(false);
   let url = $state('');
+  // Which sample (if any) is currently being imported, for inline progress.
+  let loadingSample = $state<string | null>(null);
 
   async function refresh() {
     // Load independently: a failure listing the user's datasets must not also
@@ -33,6 +35,7 @@
 
   async function onLoadSample(name: string) {
     busy = true;
+    loadingSample = name;
     try {
       const dataset = await loadSample(name);
       await goto(`/datasets/${dataset.dataset_id}`);
@@ -40,6 +43,7 @@
       showError((e as Error).message);
     } finally {
       busy = false;
+      loadingSample = null;
     }
   }
 
@@ -105,13 +109,18 @@
       <h2>Try a sample dataset</h2>
       <ul class="samples">
         {#each samples as s (s.name)}
-          <li>
+          {@const loading = loadingSample === s.name}
+          <li class:loading>
             <button data-testid={`sample-${s.name}`} onclick={() => onLoadSample(s.name)} disabled={busy}>
-              Load
+              {loading ? 'Loading…' : 'Load'}
             </button>
             <strong>{s.title}</strong>
             <span class="meta">{s.description}</span>
             <a class="src" href={s.source_url} target="_blank" rel="noreferrer">source ↗</a>
+            {#if loading}
+              <div class="progress" role="progressbar" aria-label={`Loading ${s.title}`}></div>
+              <span class="loadhint">Importing… larger datasets (e.g. spectra) can take a few seconds.</span>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -226,7 +235,49 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+  ul.samples li.loading {
+    background: #f4f9ff;
+  }
   .src {
     font-size: 0.8rem;
+  }
+  /* Indeterminate progress: the server downloads/parses the file, so there is no
+   * byte-level percentage; an animated bar shows it is working, not frozen. */
+  .progress {
+    flex-basis: 100%;
+    height: 4px;
+    margin-top: 0.3rem;
+    background: #dbe7f4;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: 40%;
+    border-radius: 2px;
+    background: #2b6cb0;
+    animation: indeterminate 1.1s ease-in-out infinite;
+  }
+  @keyframes indeterminate {
+    0% {
+      transform: translateX(-110%);
+    }
+    100% {
+      transform: translateX(360%);
+    }
+  }
+  .loadhint {
+    flex-basis: 100%;
+    font-size: 0.78rem;
+    color: #777;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .progress::after {
+      animation: none;
+      width: 100%;
+      opacity: 0.6;
+    }
   }
 </style>
