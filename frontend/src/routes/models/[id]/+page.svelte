@@ -15,6 +15,7 @@
     BarPlot,
     LinePlot,
     ScatterPlot,
+    createLinkGroup,
     fmtNum,
     type AxisControl,
     type ChartActivation,
@@ -36,6 +37,9 @@
   let detail = $state<ModelDetail | null>(null);
   let crossValidation = $state<CrossValidation | null>(null);
   let oneAxisKind = $state<OneAxisKind>('bar');
+  // Shared brushing context for this model's plots: a selection made in the
+  // scores plot (rows) or loadings plot (columns) is highlighted everywhere.
+  const link = createLinkGroup();
   // Axis selection for the scores/loadings scatters: a component index, or 'seq'
   // for the data's sequence (observation/variable) order.
   type AxisSel = number | 'seq';
@@ -50,6 +54,7 @@
     void (async () => {
       try {
         crossValidation = null;
+        link.reset();
         detail = await getModel(mid);
         // Reset axis pickers to the canonical pair for the loaded model.
         const a = detail.diagnostics?.n_components ?? 0;
@@ -210,6 +215,12 @@
   const onScoreActivate = (a: ChartActivation) => openContribution(a.dataIndex, 't2');
   const onT2Activate = (a: ChartActivation) => openContribution(a.dataIndex, 't2');
   const onSpeActivate = (a: ChartActivation) => openContribution(a.dataIndex, 'spe');
+
+  // Issue #62: double-click / long-press a loadings point opens that variable's
+  // raw data; the selected rows carry over and stay highlighted there.
+  function openVariableRaw(d: ModelDiagnostics, dataIndex: number): void {
+    rawVariable = d.x_loadings.variable_names[dataIndex];
+  }
 </script>
 
 <svelte:head><title>{pageTitle}</title></svelte:head>
@@ -251,7 +262,19 @@
       {@const d = detail.diagnostics}
       {@const oneComponent = d.n_components < 2}
       <section class="diagnostics" data-testid="diagnostics">
-        <p class="hint">Double-click or long-press a point on the scores, T², or SPE plot to see its contribution plot.</p>
+        <p class="hint">
+          Double-click or long-press a point on the scores, T², or SPE plot to see its contribution
+          plot. Use the arrow or lasso tools on the scores and loadings plots to select points; the
+          selection is highlighted across every plot.
+        </p>
+        {#if link.size > 0}
+          <p class="selection">
+            <strong>{link.size}</strong> selected
+            ({link.rows.size} row{link.rows.size === 1 ? '' : 's'},
+            {link.cols.size} column{link.cols.size === 1 ? '' : 's'})
+            <button type="button" onclick={() => link.reset()}>Clear</button>
+          </p>
+        {/if}
         {#if oneComponent}
           <div class="chart-kind">
             <label>
@@ -275,6 +298,7 @@
                 yName={axis(d, 0)}
                 xName="observation"
                 limits={[BASELINE]}
+                {link}
                 linkBy="row"
                 onactivate={onScoreActivate}
               />
@@ -287,7 +311,9 @@
                 overlays={canonical ? ellipseOverlay(d) : []}
                 axes={axisControl(d, scoresX, scoresY, (x, y) => { scoresX = x; scoresY = y; })}
                 tooltipHtml={scoreTooltip(d)}
+                {link}
                 linkBy="row"
+                selectable
                 onactivate={onScoreActivate}
               />
             {/if}
@@ -301,7 +327,9 @@
                 yName={axis(d, 0)}
                 xName="variable"
                 limits={[BASELINE]}
+                {link}
                 linkBy="col"
+                onactivate={(a) => openVariableRaw(d, a.dataIndex)}
               />
             {:else}
               <ScatterPlot
@@ -310,7 +338,10 @@
                 yName={axisName(d, loadingsY)}
                 symbolSize={9}
                 axes={axisControl(d, loadingsX, loadingsY, (x, y) => { loadingsX = x; loadingsY = y; })}
+                {link}
                 linkBy="col"
+                selectable
+                onactivate={(a) => openVariableRaw(d, a.dataIndex)}
               />
             {/if}
           </div>
@@ -320,6 +351,7 @@
               points={barsFrom(d.scores.observation_names, d.hotellings_t2, 'row')}
               yName="T²"
               limits={[{ value: d.t2_limit, label: `limit ${fmtNum(d.t2_limit)}` }]}
+              {link}
               linkBy="row"
               onactivate={onT2Activate}
             />
@@ -330,6 +362,7 @@
               points={barsFrom(d.scores.observation_names, d.spe, 'row')}
               yName="SPE"
               limits={[{ value: d.spe_limit, label: `limit ${fmtNum(d.spe_limit)}` }]}
+              {link}
               linkBy="row"
               onactivate={onSpeActivate}
             />
@@ -341,6 +374,7 @@
               yName="VIP"
               color="#805ad5"
               limits={[{ value: 1, label: 'VIP 1', dashed: true }]}
+              {link}
               linkBy="col"
               height="260px"
             />
@@ -406,6 +440,7 @@
   <ContributionModal
     contributions={contribution}
     metric={contributionMetric}
+    {link}
     onclose={() => (contribution = null)}
     onVariableClick={(v) => (rawVariable = v)}
   />
@@ -415,6 +450,7 @@
   <VariableRawModal
     datasetId={detail.summary.dataset_id}
     column={rawVariable}
+    {link}
     onclose={() => (rawVariable = null)}
   />
 {/if}
@@ -518,6 +554,26 @@
   }
   .hint {
     color: #777;
+  }
+  .selection {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.85rem;
+    margin: 0 0 0.75rem;
+  }
+  .selection button {
+    padding: 0.15rem 0.6rem;
+    border: 1px solid #c53030;
+    background: #fff;
+    color: #c53030;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .selection button:hover {
+    background: #c53030;
+    color: #fff;
   }
   .r2-table {
     width: 100%;

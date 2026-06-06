@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getVariable, type TransformKind, type VariableInspector } from '$lib/api';
-  import { Histogram, LinePlot } from '$lib/plots';
+  import { Histogram, LinePlot, fmtNum, type LinkGroup } from '$lib/plots';
 
   interface Props {
     datasetId: string;
@@ -8,6 +8,8 @@
     form?: 'raw' | 'scaled';
     appliedTransform?: TransformKind;
     excludedRows?: number[];
+    /** Shared brushing context: selected rows are highlighted in the sequence plot. */
+    link?: LinkGroup;
     onApplyTransform?: (column: string, transform: TransformKind) => void;
   }
   let {
@@ -16,6 +18,7 @@
     form = 'raw',
     appliedTransform = 'none',
     excludedRows = [],
+    link,
     onApplyTransform
   }: Props = $props();
 
@@ -32,6 +35,31 @@
   let info = $state<VariableInspector | null>(null);
   let transform = $state<TransformKind>('none');
   let error = $state<string | null>(null);
+
+  // Issue #59: label the sequence x-axis by the primary identifier unless the
+  // data is genuinely sequential (a synthetic Row column or a monotonic order).
+  const seqLabels = $derived(
+    info && info.identifiers && !info.is_sequential ? info.identifiers.map((v) => v ?? '') : undefined
+  );
+  // Selected rows (by identifier) become red-square highlights in the sequence.
+  const seqHighlight = $derived.by(() => {
+    if (!info?.identifiers || !link) return [];
+    const out: number[] = [];
+    info.identifiers.forEach((id, i) => {
+      if (id != null && link.hasRow(id)) out.push(i);
+    });
+    return out;
+  });
+  const seqTooltip = $derived.by(() => {
+    const ids = info?.identifiers;
+    if (!ids) return undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (params: any) => {
+      const p = Array.isArray(params) ? params[0] : params;
+      const i = p?.dataIndex ?? 0;
+      return `${ids[i] ?? i + 1}<br/>${column}: ${fmtNum(p?.value)}`;
+    };
+  });
 
   // When the selected column changes, preview the transform already applied to it
   // in the draft spec (so e.g. a log-transformed variable shows transformed).
@@ -108,7 +136,14 @@
         </div>
       {/if}
       <h4>Sequence</h4>
-      <LinePlot series={[{ values: info.sequence }]} xName="order" height="200px" />
+      <LinePlot
+        series={[{ values: info.sequence }]}
+        labels={seqLabels}
+        xName={seqLabels ? '' : 'order'}
+        highlight={seqHighlight}
+        tooltipFormatter={seqTooltip}
+        height="200px"
+      />
     {:else}
       <p class="hint">Distribution and transforms apply to quantitative variables.</p>
     {/if}

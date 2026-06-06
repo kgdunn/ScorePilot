@@ -1,12 +1,15 @@
 <script lang="ts">
+  import type { LinkGroup } from '$lib/plots';
   import VariableInspector from './VariableInspector.svelte';
 
   interface Props {
     datasetId: string;
     column: string;
+    /** Shared brushing context: selected rows are highlighted in the raw plot. */
+    link?: LinkGroup;
     onclose: () => void;
   }
-  let { datasetId, column, onclose }: Props = $props();
+  let { datasetId, column, link, onclose }: Props = $props();
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') onclose();
@@ -30,7 +33,7 @@
       <h3>Raw data · {column}</h3>
       <button type="button" class="close" aria-label="Close" onclick={onclose}>×</button>
     </header>
-    <VariableInspector {datasetId} {column} />
+    <VariableInspector {datasetId} {column} {link} />
   </div>
 </div>
 
