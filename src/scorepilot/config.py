@@ -45,6 +45,23 @@ class Settings(BaseSettings):
     agent_base_url: str | None = None
     agent_model_name: str | None = None
 
+    # --- Hardening knobs (all opt-in; defaults keep the local launch frictionless) ---
+    # HTTP Basic auth gate. Disabled while ``auth_password`` is unset, so a local
+    # ``uvx scorepilot`` needs no login; set a password to require auth on a public
+    # deploy (the browser prompts natively and the SPA inherits the credentials).
+    auth_username: str = "scorepilot"
+    auth_password: str | None = None
+
+    # Serve the interactive API docs (``/api/docs`` + OpenAPI). Leave on for local
+    # use; deployers can turn it off to shrink the public surface.
+    docs_enabled: bool = True
+
+    # Resource caps that bound memory regardless of who is calling. ``max_upload_mb``
+    # caps a single uploaded/fetched body; ``max_cells`` caps the parsed table so a
+    # small but highly compressed file (e.g. an ``.xlsx``) cannot expand without limit.
+    max_upload_mb: int = 100
+    max_cells: int = 50_000_000
+
 
 @lru_cache
 def get_settings() -> Settings:

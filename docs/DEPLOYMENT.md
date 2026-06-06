@@ -39,8 +39,19 @@ APP_PORT=8003
 POSTGRES_USER=scorepilot
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 POSTGRES_DB=scorepilot
+
+# App-level HTTP Basic auth (the app has no other login). Required for a public
+# deploy unless you put basic_auth in the host Caddy instead.
+SCOREPILOT_AUTH_USERNAME=scorepilot
+SCOREPILOT_AUTH_PASSWORD=$(openssl rand -hex 24)
+# Hide the interactive API docs / OpenAPI schema in production.
+SCOREPILOT_DOCS_ENABLED=false
 EOF
 ```
+
+The app reads every `SCOREPILOT_*` key in this file (forwarded via `env_file`);
+see `deploy/.env.example` for the full list (auth, docs, and the `MAX_UPLOAD_MB` /
+`MAX_CELLS` resource caps).
 
 Pick a **free** `APP_PORT` (check with `ss -tlnp | grep :8003`); other apps on the
 box already use 8000/8001/8002.
@@ -137,8 +148,22 @@ make image-run   # runs it on http://localhost:8000 with a throwaway SQLite DB
 
 ## Notes
 
-- **Auth (planned).** The site is public with no login. Add it at the host Caddy
-  with `basic_auth`, or in the app later.
+- **Auth.** The app ships an optional HTTP Basic gate, off until
+  `SCOREPILOT_AUTH_PASSWORD` is set (see the `.env` above). With it set, the whole
+  app (API, docs, SPA) requires the credentials and `/api/health` stays open for
+  the proxy. You can use the host Caddy's `basic_auth` instead if you prefer.
+- **Rate limiting.** Best applied at the host Caddy, which sees real client IPs
+  (the app, behind the proxy, only sees the proxy's IP). Example using Caddy's
+  `rate_limit` (Caddy v2 with the plugin), in the site block:
+
+  ```caddyfile
+  scorepilot.learnche.org {
+      rate_limit {
+          zone scorepilot { key {remote_host}; events 120; window 1m }
+      }
+      reverse_proxy 127.0.0.1:8003
+  }
+  ```
 - **Shared state.** Single app process: datasets in memory, models in one Postgres
   DB - concurrent users share state. Fine for team testing; per-user isolation is a
   separate design (issue #6).
