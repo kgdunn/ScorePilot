@@ -20,6 +20,7 @@ from scorepilot.core import (
     observation_contributions,
 )
 from scorepilot.core._pandas import column as get_column
+from scorepilot.core.cross_validation import CvScheme, SelectionRule
 from scorepilot.dataset_store import Dataset
 from scorepilot.db import Model
 from scorepilot.schemas import (
@@ -114,6 +115,10 @@ def _run_fit(
     conf_level: float,
     *,
     auto_components: bool = False,
+    selection_rule: SelectionRule | None = None,
+    cv_scheme: CvScheme | None = None,
+    n_repeats: int | None = None,
+    min_q2_increase: float | None = None,
 ) -> ModelDiagnostics:
     applied = apply_spec(dataset.raw, spec)
     names = _observation_names(dataset, applied)
@@ -121,7 +126,14 @@ def _run_fit(
         # Let cross-validation pick the count freely (up to the UI's ceiling),
         # rather than capping at whatever number the user happened to type.
         n_components = cross_validate(
-            applied.X, applied.Y, kind, max_components=_AUTO_MAX_COMPONENTS
+            applied.X,
+            applied.Y,
+            kind,
+            max_components=_AUTO_MAX_COMPONENTS,
+            selection_rule=selection_rule,
+            cv_scheme=cv_scheme,
+            n_repeats=n_repeats,
+            min_q2_increase=min_q2_increase,
         ).recommended
     return fit_model(
         applied.X, applied.Y, kind, n_components, conf_level=conf_level, observation_names=names
@@ -211,6 +223,10 @@ def fit_model_endpoint(
             request.n_components,
             request.conf_level,
             auto_components=request.auto_components,
+            selection_rule=request.selection_rule,
+            cv_scheme=request.cv_scheme,
+            n_repeats=request.n_repeats,
+            min_q2_increase=request.min_q2_increase,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -444,16 +460,22 @@ def model_cross_validation(
     store: DatasetStoreDep,
     repository: RepositoryDep,
     max_components: Annotated[int | None, Query(ge=1)] = None,
+    selection_rule: Annotated[SelectionRule | None, Query()] = None,
+    cv_scheme: Annotated[CvScheme | None, Query()] = None,
+    n_repeats: Annotated[int | None, Query(ge=1)] = None,
+    min_q2_increase: Annotated[float | None, Query(ge=0.0)] = None,
 ) -> CrossValidationModel:
     """Per-component calibration R2 and cross-validated Q2 for a fitted model.
 
     Backs the R2/Q2 plot and table: R2 is the in-sample fit after each component,
-    Q2 the cross-validated (out-of-sample) prediction, with the Q2-optimal
+    Q2 the cross-validated (out-of-sample) prediction, with the recommended
     component count flagged.
 
     ``max_components`` extends the curve beyond the model's current count (capped
     at the auto-fit ceiling) so the component explorer can show the diminishing
-    returns of adding more.
+    returns of adding more. ``selection_rule`` (and, for PCA, ``cv_scheme``)
+    choose how the recommended count is picked; ``n_repeats`` and
+    ``min_q2_increase`` tune the cross-validation.
     """
     model = repository.get(model_id)
     if model is None:
@@ -471,7 +493,16 @@ def model_cross_validation(
     spec = PreprocessingSpec.from_dict(model.preprocessing)
     applied = apply_spec(dataset.raw, spec)
     try:
-        cv = cross_validate(applied.X, applied.Y, model.kind, max_components=ceiling)
+        cv = cross_validate(
+            applied.X,
+            applied.Y,
+            model.kind,
+            max_components=ceiling,
+            selection_rule=selection_rule,
+            cv_scheme=cv_scheme,
+            n_repeats=n_repeats,
+            min_q2_increase=min_q2_increase,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
@@ -481,12 +512,16 @@ def model_cross_validation(
         kind=cv.kind,
         target=cv.target,
         n_splits=cv.n_splits,
+        n_repeats=cv.n_repeats,
+        selection_rule=cv.selection_rule,
+        cv_scheme=cv.cv_scheme,
         component_numbers=cv.component_numbers,
         r2=cv.r2,
         q2=cv.q2,
         r2_per_component=cv.r2_per_component,
         q2_per_component=cv.q2_per_component,
         recommended=cv.recommended,
+        recommended_is_stable=cv.recommended_is_stable,
     )
 
 

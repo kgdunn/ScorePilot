@@ -588,7 +588,7 @@ wheels = [
 
 [[package]]
 name = "process-improve"
-version = "1.27.1"
+version = "1.38.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -600,9 +600,9 @@ dependencies = [
     { name = "statsmodels" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/13/f2/429ab363e77a12318bdd1edb96430c05a03a645a4337e135574d0a0ac027/process_improve-1.27.1.tar.gz", hash = "sha256:893881a21f4e79250ac99354caa9ea6dc2fcc20d963217af7e996644c14baa49", size = 1772672, upload-time = "2026-06-06T07:52:15.356Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/13/a3/38ebf8e9f54d12ad35a5da0a14e14ed2da0c07be906b4ea9a90d16451416/process_improve-1.38.0.tar.gz", hash = "sha256:dd6219fba90dce505afcd153728b14781cd6b330fd4fd016572ae430ab817574", size = 1793001, upload-time = "2026-06-07T16:32:08.274Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/e0/459ff8d049a97d82956ef9bca5c97fe0a1570bdb8142820bf056bb66ab6e/process_improve-1.27.1-py3-none-any.whl", hash = "sha256:0b285b3df7da3347096f9524e05aee1f6309a91b2e4eda4d66df230d31c69e2f", size = 1853229, upload-time = "2026-06-06T07:52:13.139Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/2b/1b5ecff113efe211dc14d0f636d1d28ef3d30b91d18c992507b1e93d610a/process_improve-1.38.0-py3-none-any.whl", hash = "sha256:a48b0c95ee31f59034273a2bf220af9aca3bac6443bb7811336d2312076d7760", size = 1873811, upload-time = "2026-06-07T16:32:06.437Z" },
 ]
 
 [[package]]
@@ -1021,7 +1021,7 @@ wheels = [
 
 [[package]]
 name = "scorepilot"
-version = "0.18.2"
+version = "0.19.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -1054,7 +1054,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.2" },
-    { name = "process-improve", specifier = ">=1.27,<2" },
+    { name = "process-improve", specifier = ">=1.38,<2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },

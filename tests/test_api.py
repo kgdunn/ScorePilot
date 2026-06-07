@@ -550,6 +550,43 @@ def test_cross_validation_unknown_model_is_404(client: TestClient) -> None:
     assert client.get("/api/models/999/cross-validation").status_code == 404
 
 
+def test_cross_validation_reports_rule_metadata(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 3}
+    )
+    model_id = created.json()["summary"]["id"]
+    body = client.get(f"/api/models/{model_id}/cross-validation").json()
+    # PCA defaults are echoed so the explorer can show / preselect the rule.
+    assert body["selection_rule"] == "min"
+    assert body["cv_scheme"] == "ekf"
+    assert body["n_repeats"] == 1
+    assert body["recommended_is_stable"] is None
+
+
+def test_cross_validation_honours_selection_rule(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 3}
+    )
+    model_id = created.json()["summary"]["id"]
+    body = client.get(
+        f"/api/models/{model_id}/cross-validation?selection_rule=q2_increment"
+    ).json()
+    assert body["selection_rule"] == "q2_increment"
+
+
+def test_cross_validation_rejects_unsupported_rule_for_pca(client: TestClient) -> None:
+    dataset_id = _upload_csv(client)["dataset_id"]
+    created = client.post(
+        "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 2}
+    )
+    model_id = created.json()["summary"]["id"]
+    # randomization is PLS-only; the selector reports it as unprocessable.
+    resp = client.get(f"/api/models/{model_id}/cross-validation?selection_rule=randomization")
+    assert resp.status_code == 422
+
+
 def test_list_samples(client: TestClient) -> None:
     names = {s["name"] for s in client.get("/api/datasets/samples").json()}
     assert {
