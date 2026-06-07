@@ -17,6 +17,7 @@
   import { showError } from '$lib/toast.svelte';
   import { formatDateTime } from '$lib/format';
   import ComponentExplorer from '$lib/components/ComponentExplorer.svelte';
+  import { pulse } from '$lib/actions/pulse';
   import {
     BarPlot,
     LinePlot,
@@ -52,6 +53,11 @@
   let components = $state(1);
   let saving = $state(false);
   let cvMax = $state(1);
+  // Jump straight to a component count by tapping/clicking its row in the R²/Q²
+  // table (handy on touch devices where the slider is fiddly).
+  const selectComponents = (n: number): void => {
+    components = Math.max(1, Math.min(cvMax, n));
+  };
   // Component-selection controls (full rule selector). Defaults track the model
   // kind; changing either re-runs cross-validation server-side.
   let selectionRule = $state<SelectionRule>('min');
@@ -509,7 +515,23 @@
               </thead>
               <tbody>
                 {#each cv.component_numbers as comp, i (comp)}
-                  <tr class:recommended={comp === cv.recommended} class:current={comp === components}>
+                  <tr
+                    class:recommended={comp === cv.recommended}
+                    class:current={comp === components}
+                    role="button"
+                    tabindex="0"
+                    aria-pressed={comp === components}
+                    aria-label="Use {comp} component{comp === 1 ? '' : 's'}"
+                    title="Use {comp} component{comp === 1 ? '' : 's'}"
+                    onclick={() => selectComponents(comp)}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        selectComponents(comp);
+                      }
+                    }}
+                    use:pulse={{ key: comp === components ? components : null, color: 'rgba(43, 108, 176, 0.28)' }}
+                  >
                     <td>{comp}</td>
                     <td>{(cv.r2_per_component[i] * 100).toFixed(1)}%</td>
                     <td>{(cv.r2[i] * 100).toFixed(1)}%</td>
@@ -892,6 +914,17 @@
   .r2-table th {
     color: #666;
     font-weight: 600;
+  }
+  /* Rows are tappable: clicking one jumps the model to that component count. */
+  .r2-table tbody tr {
+    cursor: pointer;
+  }
+  .r2-table tbody tr:hover {
+    background: #f2f7fd;
+  }
+  .r2-table tbody tr:focus-visible {
+    outline: 2px solid #2b6cb0;
+    outline-offset: -2px;
   }
   .r2-table tr.recommended {
     background: #fffaf0;

@@ -116,6 +116,22 @@ test('component explorer: R²/Q² table highlights the current count', async ({ 
   await expect(table.locator('tr.current td').first()).toHaveText('1');
 });
 
+test('component explorer: clicking a table row jumps to that component count', async ({ page }) => {
+  await fitModel(page);
+  const count = page.getByTestId('component-count');
+  await expect(count).toHaveText('2');
+
+  // Rows are tappable (handy on touch): clicking the "1" row drops to 1 component.
+  await page.getByRole('button', { name: 'Use 1 component' }).click();
+  await expect(count).toHaveText('1');
+  await expect(page.locator('.r2-table tr.current td').first()).toHaveText('1');
+
+  // Clicking the "2" row goes back up.
+  await page.getByRole('button', { name: 'Use 2 components' }).click();
+  await expect(count).toHaveText('2');
+  await expect(page.locator('.r2-table tr.current td').first()).toHaveText('2');
+});
+
 test('scores plot exposes colour/size encoding controls', async ({ page }) => {
   await fitModel(page);
   // Present on the multi-component scores scatter.

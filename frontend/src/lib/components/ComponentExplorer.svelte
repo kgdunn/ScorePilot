@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { CrossValidation, CvScheme, SelectionRule } from '$lib/api';
+  import { pulse } from '$lib/actions/pulse';
 
   interface Props {
     /** Current component count; changing it applies live (no Apply button). */
@@ -71,7 +72,12 @@
     <span class="label">Components</span>
     <div class="stepper">
       <button type="button" aria-label="Remove a component" disabled={components <= min} onclick={() => step(-1)}>−</button>
-      <span class="value" data-testid="component-count" class:busy={saving}>{components}</span>
+      <span
+        class="value"
+        data-testid="component-count"
+        class:busy={saving}
+        use:pulse={{ key: components, kind: 'pop' }}
+      >{components}</span>
       <button type="button" aria-label="Add a component" disabled={components >= max} onclick={() => step(1)}>+</button>
     </div>
     <input
@@ -87,8 +93,12 @@
 
   {#if cv}
     <div class="totals" title="Cumulative fit (R²) and cross-validated prediction (Q²) at this count">
-      <span class="stat r2"><span class="k">R²</span> {fmtPct(totalR2)}</span>
-      <span class="stat q2"><span class="k">Q²</span> {fmtPct(totalQ2)}</span>
+      <span class="stat r2" use:pulse={{ key: totalR2, color: 'rgba(43, 108, 176, 0.18)' }}>
+        <span class="k">R²</span> {fmtPct(totalR2)}
+      </span>
+      <span class="stat q2" use:pulse={{ key: totalQ2, color: 'rgba(47, 133, 90, 0.18)' }}>
+        <span class="k">Q²</span> {fmtPct(totalQ2)}
+      </span>
     </div>
   {/if}
 
@@ -190,12 +200,25 @@
     font-size: 1.2rem;
     line-height: 1;
     cursor: pointer;
+    transition: transform 0.08s ease, background-color 0.12s ease, color 0.12s ease;
+  }
+  .stepper button:hover:not(:disabled) {
+    background: #f0f6fc;
+  }
+  /* Immediate tactile feedback so the press registers even when the recompute
+   * is instant (small datasets): the button dips and fills with the accent. */
+  .stepper button:active:not(:disabled) {
+    transform: scale(0.9);
+    background: #2b6cb0;
+    color: #fff;
   }
   .stepper button:disabled {
     opacity: 0.4;
     cursor: default;
   }
   .value {
+    /* inline-block so the pulse action's scale transform takes effect. */
+    display: inline-block;
     min-width: 1.6ch;
     text-align: center;
     font-size: 1.6rem;
