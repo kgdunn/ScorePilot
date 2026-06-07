@@ -351,26 +351,53 @@ export async function getContributions(
   return asJson(await fetch(`/api/models/${modelId}/contributions/${observation}`));
 }
 
+/** How the recommended component count is chosen. "randomization" is PLS-only. */
+export type SelectionRule = '1se' | 'min' | 'q2_increment' | 'randomization';
+/** PCA cross-validation scheme. */
+export type CvScheme = 'ekf' | 'row_wise';
+
 export interface CrossValidation {
   kind: string;
   /** What R²/Q² describe: "X" for PCA, "Y" for PLS. */
   target: string;
   n_splits: number;
+  n_repeats: number;
+  /** Rule used to pick `recommended`. */
+  selection_rule: SelectionRule;
+  /** PCA cross-validation scheme; null for PLS. */
+  cv_scheme: CvScheme | null;
   component_numbers: number[];
   r2: number[];
   q2: number[];
   r2_per_component: number[];
   q2_per_component: number[];
   recommended: number;
+  /** Whether the PLS recommendation was stable across CV repeats; null otherwise. */
+  recommended_is_stable: boolean | null;
+}
+
+/** Options controlling how the recommended component count is chosen. */
+export interface CrossValidationOptions {
+  maxComponents?: number;
+  selectionRule?: SelectionRule;
+  cvScheme?: CvScheme;
+  nRepeats?: number;
+  minQ2Increase?: number;
 }
 
 /** Per-component calibration R² and cross-validated Q² for a fitted model. */
 export async function getCrossValidation(
   modelId: number,
-  maxComponents?: number
+  options: CrossValidationOptions = {}
 ): Promise<CrossValidation> {
-  const q = maxComponents ? `?max_components=${maxComponents}` : '';
-  return asJson(await fetch(`/api/models/${modelId}/cross-validation${q}`));
+  const params = new URLSearchParams();
+  if (options.maxComponents != null) params.set('max_components', String(options.maxComponents));
+  if (options.selectionRule) params.set('selection_rule', options.selectionRule);
+  if (options.cvScheme) params.set('cv_scheme', options.cvScheme);
+  if (options.nRepeats != null) params.set('n_repeats', String(options.nRepeats));
+  if (options.minQ2Increase != null) params.set('min_q2_increase', String(options.minQ2Increase));
+  const q = params.toString();
+  return asJson(await fetch(`/api/models/${modelId}/cross-validation${q ? `?${q}` : ''}`));
 }
 
 export interface VariantRequest {

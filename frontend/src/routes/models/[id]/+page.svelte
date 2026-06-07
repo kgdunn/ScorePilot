@@ -9,8 +9,10 @@
     updateModelComponents,
     type Contributions,
     type CrossValidation,
+    type CvScheme,
     type ModelDetail,
-    type ModelDiagnostics
+    type ModelDiagnostics,
+    type SelectionRule
   } from '$lib/api';
   import { showError } from '$lib/toast.svelte';
   import { formatDateTime } from '$lib/format';
@@ -50,6 +52,10 @@
   let components = $state(1);
   let saving = $state(false);
   let cvMax = $state(1);
+  // Component-selection controls (full rule selector). Defaults track the model
+  // kind; changing either re-runs cross-validation server-side.
+  let selectionRule = $state<SelectionRule>('min');
+  let cvScheme = $state<CvScheme>('ekf');
   let displayDiag = $state<ModelDiagnostics | null>(null);
   let diagCache = new Map<number, ModelDiagnostics>();
   const diag = $derived<ModelDiagnostics | null>(displayDiag);
@@ -114,22 +120,44 @@
         scoresY = a >= 2 ? 1 : 'seq';
         loadingsX = 0;
         loadingsY = a >= 2 ? 1 : 'seq';
-        // Cross-validation is recomputed server-side; load it separately so a
-        // failure (e.g. too few rows) doesn't block the rest of the diagnostics.
+        // Cross-validation is fetched by the dedicated effect below (so it also
+        // re-runs when the selection rule / scheme change). Here we just set the
+        // curve ceiling and reset the controls to this model kind's defaults.
         // Extend the curve past the current count (bounded by rank) so the
         // explorer can show the value of adding more components.
         if (dg) {
           const kVars = dg.x_loadings.variable_names.length;
           const nObs = dg.scores.data.length;
           cvMax = Math.max(a, Math.min(20, kVars, Math.max(1, nObs - 1)));
-          try {
-            crossValidation = await getCrossValidation(mid, cvMax);
-          } catch {
-            crossValidation = null;
-          }
+          selectionRule = detail.summary.kind === 'PLS' ? '1se' : 'min';
+          cvScheme = 'ekf';
         }
       } catch (e) {
         showError((e as Error).message);
+      }
+    })();
+  });
+
+  // Re-run cross-validation whenever the loaded model, its component ceiling, or
+  // the selection controls change. Kept separate from diagnostics so a CV
+  // failure (e.g. too few rows, collinear data) never blocks the rest of the page.
+  $effect(() => {
+    const mid = id;
+    const max = cvMax;
+    const rule = selectionRule;
+    const scheme = cvScheme;
+    // Only fetch once the detail for *this* model has loaded, to avoid a stale
+    // fetch with the previous model's ceiling while navigating.
+    if (!detail || detail.summary.id !== mid || max < 1) return;
+    void (async () => {
+      try {
+        crossValidation = await getCrossValidation(mid, {
+          maxComponents: max,
+          selectionRule: rule,
+          cvScheme: scheme
+        });
+      } catch {
+        crossValidation = null;
       }
     })();
   });
@@ -428,6 +456,9 @@
           max={cvMax}
           recommended={crossValidation?.recommended ?? null}
           cv={crossValidation}
+          kind={d.kind}
+          bind:selectionRule
+          bind:cvScheme
           {saving}
         />
         {#if crossValidation}

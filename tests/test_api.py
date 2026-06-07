@@ -570,9 +570,7 @@ def test_cross_validation_honours_selection_rule(client: TestClient) -> None:
         "/api/models", json={"dataset_id": dataset_id, "kind": "PCA", "n_components": 3}
     )
     model_id = created.json()["summary"]["id"]
-    body = client.get(
-        f"/api/models/{model_id}/cross-validation?selection_rule=q2_increment"
-    ).json()
+    body = client.get(f"/api/models/{model_id}/cross-validation?selection_rule=q2_increment").json()
     assert body["selection_rule"] == "q2_increment"
 
 

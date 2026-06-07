@@ -130,11 +130,9 @@ def test_collinear_pls_raises_value_error() -> None:
     rng = np.random.default_rng(0)
     base = rng.normal(size=(40, 2))
     # Six columns spanning only a 2D space (each a duplicate of the two bases).
-    x = pd.DataFrame(
-        np.hstack([base, base, base]), columns=[f"x{i}" for i in range(6)]
-    )
+    x = pd.DataFrame(np.hstack([base, base, base]), columns=[f"x{i}" for i in range(6)])
     y = pd.DataFrame(base @ rng.normal(size=(2, 1)), columns=["y"])
     spec = PreprocessingSpec(x_columns=tuple(x.columns), y_columns=("y",))
     applied = apply_spec(pd.concat([x, y], axis=1), spec)
-    with pytest.raises(ValueError, match="singular|ill-conditioned|collinear|variance"):
+    with pytest.raises(ValueError, match=r"singular|ill-conditioned|collinear|variance"):
         cross_validate(applied.X, applied.Y, "PLS", max_components=6)
