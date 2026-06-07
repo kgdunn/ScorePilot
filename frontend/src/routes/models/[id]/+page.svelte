@@ -467,15 +467,23 @@
             <h3>R² and cross-validated R² (Q²) per component</h3>
             <p class="hint">
               R² is the in-sample fit of {cv.target}; Q² is its cross-validated
-              ({cv.n_splits}-fold) prediction. The blue marker tracks the slider above;
-              cross-validation recommends
+              ({cv.n_splits}-fold) prediction, with a shaded ±1 SE band. The blue marker
+              tracks the slider above; the <strong>{cv.selection_rule}</strong> rule recommends
               <strong>{cv.recommended}</strong>
-              component{cv.recommended === 1 ? '' : 's'}.
+              component{cv.recommended === 1 ? '' : 's'}
+              {#if cv.recommended_vote_share != null}
+                (chosen in {Math.round(cv.recommended_vote_share * 100)}% of {cv.n_repeats} repeats{#if cv.recommended_is_stable === false}, <span class="unstable">unstable</span>{/if})
+              {/if}.
             </p>
             <LinePlot
               series={[
                 { name: `R² (${cv.target})`, values: cv.r2, color: '#2b6cb0' },
-                { name: `Q² (${cv.target}, cross-validated)`, values: cv.q2, color: '#2f855a' }
+                {
+                  name: `Q² (${cv.target}, cross-validated)`,
+                  values: cv.q2,
+                  color: '#2f855a',
+                  band: cv.q2_se
+                }
               ]}
               labels={cv.component_numbers}
               xName="components"
@@ -860,6 +868,10 @@
   .selection button.clear:hover {
     background: #c53030;
     color: #fff;
+  }
+  .unstable {
+    color: #c05621;
+    font-weight: 600;
   }
   .r2-table {
     width: 100%;

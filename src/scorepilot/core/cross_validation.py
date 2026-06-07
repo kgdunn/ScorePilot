@@ -24,6 +24,13 @@ directly - PCA via its ``q2`` field, PLS via the ``"total"`` column of
 ``r2y_validated`` - normalised the same way as the calibration R2, so R2 and Q2
 are directly comparable.
 
+Alongside the curves we report a per-component Q2 standard error (the half-width
+of a +/-1 SE band around the Q2 line, for visualising the uncertainty behind the
+1-SE rule) and, for PLS, how stable the recommendation was across cross-validation
+repeats (whether the modal choice cleared the stability threshold, and its vote
+share). The standard error is adapted from the selector's PRESS / RMSECV error;
+see :func:`_q2_standard_error`.
+
 The selectors re-fit the centring/scaling inside each training fold
 (``scale_inside_folds=True``), so passing the already-centered/scaled output of
 :func:`apply_spec` is harmless (re-scaling already-scaled data is close to a
@@ -82,6 +89,9 @@ class CrossValidation:
     component_numbers: list[int]  # 1, 2, ..., A
     r2: list[float]  # cumulative calibration R2 after each component
     q2: list[float]  # cumulative cross-validated R2 (Q2) after each component
+    # Standard error of Q2 per component (the half-width of a +/-1 SE band around
+    # the Q2 curve), derived from the selector's PRESS / RMSECV standard error.
+    q2_se: list[float]
     r2_per_component: list[float]
     q2_per_component: list[float]
     recommended: int  # component count recommended by the library's selector
@@ -89,6 +99,44 @@ class CrossValidation:
     # vote share cleared the selector's stability threshold). ``None`` when not
     # applicable (PCA, or a rule that does not vote across repeats).
     recommended_is_stable: bool | None
+    # Fraction of CV repeats that voted for ``recommended`` (PLS only; the modal
+    # vote share). ``None`` for PCA or rules that do not vote across repeats.
+    recommended_vote_share: float | None
+
+
+@dataclass(frozen=True)
+class _Curves:
+    """Internal: the per-kind selector output adapted into common arrays."""
+
+    r2: list[float]
+    q2: list[float]
+    q2_se: list[float]
+    recommended: int
+    stable: bool | None
+    vote_share: float | None
+
+
+def _q2_standard_error(press: np.ndarray, q2: np.ndarray, press_se: np.ndarray) -> list[float]:
+    """Convert a per-component PRESS standard error onto the Q2 scale.
+
+    ADAPTER (flagged): ``process_improve`` reports the cross-validated error and
+    its standard error on the PRESS / RMSECV scale, but ScorePilot plots Q2. Since
+    ``Q2 = 1 - PRESS / SS_null`` and the null sum-of-squares ``SS_null`` is a
+    single constant across component counts (it depends only on the data, not the
+    model size), a PRESS standard error maps to the Q2 scale by dividing by that
+    constant. We recover ``SS_null`` from the selector's own PRESS and Q2 - the
+    median of ``PRESS / (1 - Q2)`` over components - so this is a unit change on a
+    value the library already computed, not a reimplementation of the
+    cross-validation. A library-provided Q2 standard error would let us delete
+    this; see the open-items note in the PR.
+    """
+    finite = np.isfinite(q2) & np.isfinite(press) & (np.abs(1.0 - q2) > 1e-9)
+    if not finite.any():
+        return [0.0] * len(q2)
+    ss_null = float(np.median(press[finite] / (1.0 - q2[finite])))
+    if not np.isfinite(ss_null) or ss_null <= 0.0:
+        return [0.0] * len(q2)
+    return [float(abs(se) / ss_null) if np.isfinite(se) else 0.0 for se in press_se]
 
 
 def _cumulative_diffs(cumulative: list[float]) -> list[float]:
@@ -164,7 +212,7 @@ def cross_validate(
             if y_block is None or y_block.shape[1] == 0:
                 msg = "PLS cross-validation requires at least one Y column."
                 raise ValueError(msg)
-            r2, q2, recommended, stable = _pls_curves(
+            curves = _pls_curves(
                 x_block,
                 y_block,
                 max_components,
@@ -176,7 +224,7 @@ def cross_validate(
             target = "Y"
         else:
             scheme = cv_scheme or _DEFAULT_CV_SCHEME
-            r2, q2, recommended = _pca_curves(
+            curves = _pca_curves(
                 x_block,
                 max_components,
                 n_folds,
@@ -186,7 +234,6 @@ def cross_validate(
                 min_q2_increase=increment,
             )
             target = "X"
-            stable = None
     except NotEnoughVarianceError as exc:  # more components than the data's rank supports
         msg = f"Too many components for the data available to cross-validate: {exc}"
         raise ValueError(msg) from exc
@@ -203,13 +250,15 @@ def cross_validate(
         n_repeats=repeats,
         selection_rule=rule,
         cv_scheme=scheme,
-        component_numbers=list(range(1, len(r2) + 1)),
-        r2=r2,
-        q2=q2,
-        r2_per_component=_cumulative_diffs(r2),
-        q2_per_component=_cumulative_diffs(q2),
-        recommended=recommended,
-        recommended_is_stable=stable,
+        component_numbers=list(range(1, len(curves.r2) + 1)),
+        r2=curves.r2,
+        q2=curves.q2,
+        q2_se=curves.q2_se,
+        r2_per_component=_cumulative_diffs(curves.r2),
+        q2_per_component=_cumulative_diffs(curves.q2),
+        recommended=curves.recommended,
+        recommended_is_stable=curves.stable,
+        recommended_vote_share=curves.vote_share,
     )
 
 
@@ -222,8 +271,8 @@ def _pca_curves(
     cv_scheme: CvScheme,
     n_repeats: int,
     min_q2_increase: float,
-) -> tuple[list[float], list[float], int]:
-    """R2X, Q2X, and recommendation for PCA via ``PCA.select_n_components``.
+) -> _Curves:
+    """R2X, Q2X, the Q2 standard error, and recommendation for PCA.
 
     The selector reports the cross-validated R2X (Q2) per component directly in
     its ``q2`` field - PRESS normalised by the same null-model sum-of-squares the
@@ -231,7 +280,9 @@ def _pca_curves(
     Under the element-wise scheme ``q2`` may legitimately go negative (a
     component predicting held-out cells worse than their column mean); ``q2`` is
     rejected only when it is non-finite, which means the block had no variance to
-    cross-validate.
+    cross-validate. The +/-1 SE band comes from the selector's ``se_press`` mapped
+    onto the Q2 scale. PCA does not vote across repeats, so there is no stability
+    or vote share to report.
     """
     selection = PCA.select_n_components(
         x_block,
@@ -250,7 +301,19 @@ def _pca_curves(
     q2 = [float(v) for v in q2_values]
     a_max = len(q2)
     r2 = [float(v) for v in np.asarray(PCA(n_components=a_max).fit(x_block).r2_cumulative_)[:a_max]]
-    return r2, q2, int(selection.n_components)
+    q2_se = _q2_standard_error(
+        np.asarray(selection.press.to_numpy(), dtype=float),
+        q2_values,
+        np.asarray(selection.se_press.to_numpy(), dtype=float),
+    )
+    return _Curves(
+        r2=r2,
+        q2=q2,
+        q2_se=q2_se,
+        recommended=int(selection.n_components),
+        stable=None,
+        vote_share=None,
+    )
 
 
 def _pls_curves(
@@ -262,13 +325,18 @@ def _pls_curves(
     selection_rule: SelectionRule,
     n_repeats: int,
     min_q2_increase: float,
-) -> tuple[list[float], list[float], int, bool | None]:
-    """R2Y, Q2Y, recommendation, and stability for PLS via ``PLS.select_n_components``.
+) -> _Curves:
+    """R2Y, Q2Y, the Q2 standard error, recommendation, and stability for PLS.
 
     The selector returns the validated R2Y per component directly (the ``"total"``
     column of ``r2y_validated``); the calibration R2Y is the fitted model's
     ``r2_cumulative_``. ``selection_is_stable`` reports whether the recommended
-    count was the stable modal choice across the cross-validation repeats.
+    count was the stable modal choice across the cross-validation repeats, and
+    ``selection_distribution`` gives the per-count vote share. The +/-1 SE band is
+    derived from the selector's ``se_rmsecv``: since ``PRESS = N * RMSECV**2``, a
+    relative RMSECV error maps to twice the relative PRESS error
+    (``se_press / press = 2 * se_rmsecv / rmsecv``), which the shared
+    :func:`_q2_standard_error` adapter then puts on the Q2 scale.
     """
     selection = PLS.select_n_components(
         x_block,
@@ -280,9 +348,30 @@ def _pls_curves(
         min_q2_increase=min_q2_increase,
         random_state=_RANDOM_STATE,
     )
-    q2 = [float(v) for v in selection.r2y_validated["total"].to_numpy()]
+    q2_values = np.asarray(selection.r2y_validated["total"].to_numpy(), dtype=float)
+    q2 = [float(v) for v in q2_values]
     a_max = len(q2)
     model = PLS(n_components=a_max, scale=False).fit(x_block, y_block)
     r2 = [float(v) for v in np.asarray(model.r2_cumulative_)[:a_max]]
+
+    press = np.asarray(selection.press.to_numpy(), dtype=float)
+    rmsecv_total = np.asarray(selection.rmsecv["total"].to_numpy(), dtype=float)
+    se_rmsecv = np.asarray(selection.se_rmsecv.to_numpy(), dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        press_se = np.where(rmsecv_total > 0.0, 2.0 * press * se_rmsecv / rmsecv_total, 0.0)
+    q2_se = _q2_standard_error(press, q2_values, press_se)
+
+    recommended = int(selection.n_components)
     stable = selection.selection_is_stable
-    return r2, q2, int(selection.n_components), None if stable is None else bool(stable)
+    dist = selection.selection_distribution
+    vote_share = (
+        float(dist[recommended]) if dist is not None and recommended in dist.index else None
+    )
+    return _Curves(
+        r2=r2,
+        q2=q2,
+        q2_se=q2_se,
+        recommended=recommended,
+        stable=None if stable is None else bool(stable),
+        vote_share=vote_share,
+    )

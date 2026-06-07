@@ -93,6 +93,31 @@ def test_default_rule_metadata(rank2: tuple[pd.DataFrame, pd.DataFrame]) -> None
     assert pls.cv_scheme is None
     assert pls.n_repeats == 10
     assert isinstance(pls.recommended_is_stable, bool)
+    # PCA does not vote across repeats; PLS reports a modal vote share in [0, 1].
+    assert pca.recommended_vote_share is None
+    assert pls.recommended_vote_share is not None
+    assert 0.0 <= pls.recommended_vote_share <= 1.0
+
+
+def test_q2_standard_error_band(rank2: tuple[pd.DataFrame, pd.DataFrame]) -> None:
+    """Both kinds report a finite, non-negative +/-1 SE band aligned to the Q2 curve."""
+    x, y = rank2
+    pca = cross_validate(
+        apply_spec(x, PreprocessingSpec(x_columns=tuple(x.columns))).X,
+        None,
+        "PCA",
+        max_components=5,
+    )
+    assert len(pca.q2_se) == len(pca.q2)
+    assert all(np.isfinite(s) and s >= 0.0 for s in pca.q2_se)
+    # A clean 2-component structure gives a tight band (well under one Q2 unit).
+    assert max(pca.q2_se) < 0.5
+
+    spec = PreprocessingSpec(x_columns=tuple(x.columns), y_columns=("y",))
+    applied = apply_spec(pd.concat([x, y], axis=1), spec)
+    pls = cross_validate(applied.X, applied.Y, "PLS", max_components=5)
+    assert len(pls.q2_se) == len(pls.q2)
+    assert all(np.isfinite(s) and s >= 0.0 for s in pls.q2_se)
 
 
 def test_pca_selection_rules_and_schemes(rank2: tuple[pd.DataFrame, pd.DataFrame]) -> None:

@@ -346,6 +346,8 @@ export interface LineSeries {
   /** y values; x comes from `labels` (category) or the index. */
   values: (number | null)[];
   color?: string;
+  /** Optional symmetric half-widths per point; renders a shaded ±band around the line. */
+  band?: (number | null)[];
 }
 
 export interface LineConfig {
@@ -398,6 +400,47 @@ export function lineOption(cfg: LineConfig): EChartsOption {
       label: { position: 'insideEndTop' as const, color: m.color ?? '#dd6b20', fontSize: 10, formatter: () => m.label ?? '' }
     }))
   ];
+  const mainSeries = series.map((s, si) => ({
+    name: s.name,
+    type: 'line' as const,
+    data: s.values.map((v, i) =>
+      si === 0 && hi.has(i)
+        ? { value: v, symbol: 'rect', symbolSize: 11, itemStyle: { color: 'transparent', borderColor: SELECT_BORDER, borderWidth: 2 } }
+        : v
+    ),
+    showSymbol: showSymbol || (si === 0 && hi.size > 0),
+    symbolSize: 7,
+    lineStyle: { color: s.color ?? palette[si % palette.length] },
+    itemStyle: { color: s.color ?? palette[si % palette.length] },
+    markLine:
+      si === 0 && markLineData.length
+        ? { silent: true, symbol: 'none', animation: false, data: markLineData }
+        : undefined
+  }));
+  // A ±band is drawn as the canonical ECharts pair: an invisible lower-bound line
+  // and a transparent-line area of height 2·band stacked on top of it, so the
+  // shaded ribbon spans [value−band, value+band]. Kept out of the legend/tooltip
+  // and drawn beneath the main lines.
+  const bandSeries = series.flatMap((s, si) => {
+    const band = s.band;
+    if (!band) return [];
+    const color = s.color ?? palette[si % palette.length];
+    const lower = s.values.map((v, i) => (v == null || band[i] == null ? null : (v as number) - (band[i] as number)));
+    const height = s.values.map((v, i) => (v == null || band[i] == null ? null : 2 * (band[i] as number)));
+    const common = {
+      type: 'line' as const,
+      stack: `band-${si}`,
+      symbol: 'none' as const,
+      silent: true,
+      legendHoverLink: false,
+      lineStyle: { opacity: 0 },
+      tooltip: { show: false }
+    };
+    return [
+      { ...common, name: `__bandbase_${si}`, data: lower, areaStyle: { opacity: 0 } },
+      { ...common, name: `__band_${si}`, data: height, areaStyle: { color, opacity: 0.13 } }
+    ];
+  });
   return {
     animation: false,
     grid: { left: 56, right: 16, top: legend ? 36 : 16, bottom: xName ? 44 : 40 },
@@ -417,23 +460,7 @@ export function lineOption(cfg: LineConfig): EChartsOption {
       axisLabel: categoryAxisLabel
     },
     yAxis: { type: 'value', name: yName, scale: true },
-    series: series.map((s, si) => ({
-      name: s.name,
-      type: 'line' as const,
-      data: s.values.map((v, i) =>
-        si === 0 && hi.has(i)
-          ? { value: v, symbol: 'rect', symbolSize: 11, itemStyle: { color: 'transparent', borderColor: SELECT_BORDER, borderWidth: 2 } }
-          : v
-      ),
-      showSymbol: showSymbol || (si === 0 && hi.size > 0),
-      symbolSize: 7,
-      lineStyle: { color: s.color ?? palette[si % palette.length] },
-      itemStyle: { color: s.color ?? palette[si % palette.length] },
-      markLine:
-        si === 0 && markLineData.length
-          ? { silent: true, symbol: 'none', animation: false, data: markLineData }
-          : undefined
-    }))
+    series: [...bandSeries, ...mainSeries]
   };
 }
 
