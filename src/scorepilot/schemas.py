@@ -15,6 +15,7 @@ from scorepilot.core import (
     TransformKind,
     VariableTransform,
 )
+from scorepilot.core.cross_validation import CvScheme, SelectionRule
 
 
 class ApiModel(BaseModel):
@@ -300,8 +301,9 @@ class FitModelRequest(ApiModel):
     """Request to fit a model variant from a dataset and a preprocessing spec.
 
     With ``auto_components`` the number of components is chosen by
-    cross-validation (the Q2-optimal count) and ``n_components`` is used only as
-    an upper bound on what is evaluated.
+    cross-validation via the selected ``selection_rule`` (the one-standard-error
+    rule for PLS and the lowest cross-validated error for PCA, by default), and
+    ``n_components`` is used only as an upper bound on what is evaluated.
     """
 
     dataset_id: str
@@ -312,6 +314,11 @@ class FitModelRequest(ApiModel):
     name: str | None = None
     parent_id: int | None = None
     spec: PreprocessingSpecModel | None = None
+    # Cross-validation controls used only when ``auto_components`` is set.
+    selection_rule: SelectionRule | None = None
+    cv_scheme: CvScheme | None = None  # PCA only
+    n_repeats: int | None = Field(default=None, ge=1)
+    min_q2_increase: float | None = Field(default=None, ge=0.0)
 
 
 class UpdateModelRequest(ApiModel):
@@ -342,9 +349,13 @@ class CrossValidationModel(ApiModel):
     kind: str
     target: str
     n_splits: int
+    n_repeats: int
+    selection_rule: str
+    cv_scheme: str | None  # PCA cross-validation scheme; null for PLS
     component_numbers: list[int]
     r2: list[float]
     q2: list[float]
     r2_per_component: list[float]
     q2_per_component: list[float]
     recommended: int
+    recommended_is_stable: bool | None  # PLS stability across CV repeats; null otherwise

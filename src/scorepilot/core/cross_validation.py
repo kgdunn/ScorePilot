@@ -7,32 +7,39 @@ This module reports, per component count:
 - ``q2`` - the cross-validated (out-of-sample) cumulative fraction predicted.
 
 For PCA the target is the X block; for PLS it is the Y block. The recommended
-number of components follows the library's selector (Wold's PRESS-ratio criterion
-for PCA, minimum RMSECV for PLS).
+number of components follows the library's selector, which offers several
+selection rules (see :data:`SelectionRule`): the one-standard-error rule
+(``"1se"``, the PLS default), the lowest cross-validated error (``"min"``, the
+PCA default), a cumulative-Q2 increment threshold (``"q2_increment"``), or - for
+PLS only - Van der Voet's randomization test (``"randomization"``). PCA also
+chooses a cross-validation scheme (see :data:`CvScheme`): element-wise k-fold
+(``"ekf"``, the default; Bro et al. 2008) or the legacy ``"row_wise"`` scheme.
 
-The cross-validation itself - fold splitting, PRESS, and the validated R2 - is
-delegated to ``process_improve``'s ``PCA.select_n_components`` /
-``PLS.select_n_components`` rather than reimplemented here; we only adapt their
-output into one small, serialization-friendly result. Both selectors report the
-cross-validated R2 (Q2) directly - PCA via its ``q2`` field, PLS via the
-``"total"`` column of ``r2y_validated`` - normalised the same way as the
-calibration R2, so R2 and Q2 are directly comparable.
+The cross-validation itself - fold splitting, in-fold scaling, PRESS, the
+validated R2, and the recommendation - is delegated to ``process_improve``'s
+``PCA.select_n_components`` / ``PLS.select_n_components`` rather than
+reimplemented here; we only adapt their output into one small,
+serialization-friendly result. Both selectors report the cross-validated R2 (Q2)
+directly - PCA via its ``q2`` field, PLS via the ``"total"`` column of
+``r2y_validated`` - normalised the same way as the calibration R2, so R2 and Q2
+are directly comparable.
 
-Like those selectors, this expects ``x_block`` (and ``y_block`` for PLS) to be the
-already-centered/scaled output of :func:`apply_spec`, and refits on each fold
-without re-deriving the scaling inside the fold; folds therefore share the scaling
-of the full dataset, which makes the reported errors slightly optimistic.
+The selectors re-fit the centring/scaling inside each training fold
+(``scale_inside_folds=True``), so passing the already-centered/scaled output of
+:func:`apply_spec` is harmless (re-scaling already-scaled data is close to a
+no-op) and the reported errors no longer leak the full-dataset scaling into the
+held-out rows.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from process_improve.multivariate import PCA, PLS
 from process_improve.multivariate.methods import NotEnoughVarianceError
-from sklearn.model_selection import KFold
 
 from scorepilot.core.modeling import ModelKind
 
@@ -40,6 +47,26 @@ from scorepilot.core.modeling import ModelKind
 # on demand) and a fixed shuffle seed keeps the result deterministic across runs.
 DEFAULT_N_SPLITS = 7
 _RANDOM_STATE = 0
+
+# How the recommended component count is chosen, and (PCA only) which
+# cross-validation scheme produces the PRESS. These mirror the string options of
+# ``process_improve``'s selectors; the values are passed straight through and
+# validated there.
+SelectionRule = Literal["1se", "min", "q2_increment", "randomization"]
+CvScheme = Literal["ekf", "row_wise"]
+
+# Rules each model kind supports (PCA has no randomization test) and their
+# per-kind defaults, matching ``process_improve``'s own defaults.
+PLS_RULES: tuple[SelectionRule, ...] = ("1se", "min", "q2_increment", "randomization")
+PCA_RULES: tuple[SelectionRule, ...] = ("min", "1se", "q2_increment")
+_DEFAULT_RULE: dict[ModelKind, SelectionRule] = {"PLS": "1se", "PCA": "min"}
+# Repeated K-fold is the research-backed default for PLS's 1-SE rule; PCA's
+# element-wise scheme already covers every cell once per repeat.
+_DEFAULT_N_REPEATS: dict[ModelKind, int] = {"PLS": 10, "PCA": 1}
+_DEFAULT_CV_SCHEME: CvScheme = "ekf"
+# Marginal-Q2 threshold for the "q2_increment" rule; mirrors process_improve's
+# own default (one percentage point of predicted variance).
+_DEFAULT_MIN_Q2_INCREASE = 0.01
 
 
 @dataclass(frozen=True)
@@ -49,12 +76,19 @@ class CrossValidation:
     kind: ModelKind
     target: str  # "X" for PCA, "Y" for PLS - what R2/Q2 describe.
     n_splits: int
+    n_repeats: int
+    selection_rule: SelectionRule  # how ``recommended`` was chosen
+    cv_scheme: CvScheme | None  # PCA cross-validation scheme; None for PLS
     component_numbers: list[int]  # 1, 2, ..., A
     r2: list[float]  # cumulative calibration R2 after each component
     q2: list[float]  # cumulative cross-validated R2 (Q2) after each component
     r2_per_component: list[float]
     q2_per_component: list[float]
     recommended: int  # component count recommended by the library's selector
+    # Whether the PLS recommendation was stable across CV repeats (the modal
+    # vote share cleared the selector's stability threshold). ``None`` when not
+    # applicable (PCA, or a rule that does not vote across repeats).
+    recommended_is_stable: bool | None
 
 
 def _cumulative_diffs(cumulative: list[float]) -> list[float]:
@@ -68,6 +102,10 @@ def cross_validate(
     *,
     max_components: int | None = None,
     n_splits: int = DEFAULT_N_SPLITS,
+    selection_rule: SelectionRule | None = None,
+    cv_scheme: CvScheme | None = None,
+    n_repeats: int | None = None,
+    min_q2_increase: float | None = None,
 ) -> CrossValidation:
     """Evaluate a model at 1..A components and report R2, Q2, and a recommendation.
 
@@ -79,13 +117,28 @@ def cross_validate(
     max_components
         Largest component count to evaluate. Defaults to the data's rank.
     n_splits
-        Number of K-fold splits (clamped to the number of observations).
+        Number of K-fold splits (clamped to the number of observations). For PCA
+        under the element-wise scheme this is the number of element folds.
+    selection_rule
+        Which rule chooses the recommended component count (see
+        :data:`SelectionRule`). Defaults to ``"1se"`` for PLS and ``"min"`` for
+        PCA. ``"randomization"`` is PLS-only.
+    cv_scheme
+        PCA cross-validation scheme (see :data:`CvScheme`); ignored for PLS.
+        Defaults to ``"ekf"``.
+    n_repeats
+        How many times to repeat the (shuffled) cross-validation. Defaults to
+        10 for PLS (the 1-SE rule needs the repeats) and 1 for PCA.
+    min_q2_increase
+        Threshold for the ``"q2_increment"`` rule; ignored by other rules.
+        Defaults to the library's value.
 
     Raises
     ------
     ValueError
-        For an unknown ``kind``, a PLS request without Y columns, or data the
-        underlying selector cannot cross-validate.
+        For an unknown ``kind``, a PLS request without Y columns, an unsupported
+        ``selection_rule`` for the kind, or data the underlying selector cannot
+        cross-validate (including rank-deficient / collinear folds).
     """
     if kind not in ("PCA", "PLS"):
         msg = f"Unknown model kind: {kind!r} (expected 'PCA' or 'PLS')"
@@ -94,48 +147,102 @@ def cross_validate(
     if n_rows < 2:
         msg = "Cross-validation needs at least two observations."
         raise ValueError(msg)
-    folds = KFold(n_splits=max(2, min(n_splits, n_rows)), shuffle=True, random_state=_RANDOM_STATE)
+
+    rule = selection_rule or _DEFAULT_RULE[kind]
+    allowed = PLS_RULES if kind == "PLS" else PCA_RULES
+    if rule not in allowed:
+        choices = ", ".join(allowed)
+        msg = f"selection_rule {rule!r} is not supported for {kind}; choose one of {choices}."
+        raise ValueError(msg)
+    repeats = n_repeats if n_repeats is not None else _DEFAULT_N_REPEATS[kind]
+    increment = min_q2_increase if min_q2_increase is not None else _DEFAULT_MIN_Q2_INCREASE
+    n_folds = max(2, min(n_splits, n_rows))
+    scheme: CvScheme | None = None
 
     try:
         if kind == "PLS":
             if y_block is None or y_block.shape[1] == 0:
                 msg = "PLS cross-validation requires at least one Y column."
                 raise ValueError(msg)
-            r2, q2, recommended = _pls_curves(x_block, y_block, max_components, folds)
+            r2, q2, recommended, stable = _pls_curves(
+                x_block,
+                y_block,
+                max_components,
+                n_folds,
+                selection_rule=rule,
+                n_repeats=repeats,
+                min_q2_increase=increment,
+            )
             target = "Y"
         else:
-            r2, q2, recommended = _pca_curves(x_block, max_components, folds)
+            scheme = cv_scheme or _DEFAULT_CV_SCHEME
+            r2, q2, recommended = _pca_curves(
+                x_block,
+                max_components,
+                n_folds,
+                selection_rule=rule,
+                cv_scheme=scheme,
+                n_repeats=repeats,
+                min_q2_increase=increment,
+            )
             target = "X"
+            stable = None
     except NotEnoughVarianceError as exc:  # more components than the data's rank supports
         msg = f"Too many components for the data available to cross-validate: {exc}"
         raise ValueError(msg) from exc
-    except (RuntimeError, FloatingPointError) as exc:  # selector could not converge otherwise
+    except (RuntimeError, FloatingPointError, np.linalg.LinAlgError) as exc:
+        # The selector could not converge - e.g. collinear / rank-deficient folds
+        # make the PLS weight inversion ill-conditioned. Surface it as a clean
+        # input error rather than letting it escape as a 500.
         raise ValueError(str(exc)) from exc
 
     return CrossValidation(
         kind=kind,
         target=target,
-        n_splits=folds.get_n_splits(),
+        n_splits=n_folds,
+        n_repeats=repeats,
+        selection_rule=rule,
+        cv_scheme=scheme,
         component_numbers=list(range(1, len(r2) + 1)),
         r2=r2,
         q2=q2,
         r2_per_component=_cumulative_diffs(r2),
         q2_per_component=_cumulative_diffs(q2),
         recommended=recommended,
+        recommended_is_stable=stable,
     )
 
 
 def _pca_curves(
-    x_block: pd.DataFrame, max_components: int | None, folds: KFold
+    x_block: pd.DataFrame,
+    max_components: int | None,
+    n_folds: int,
+    *,
+    selection_rule: SelectionRule,
+    cv_scheme: CvScheme,
+    n_repeats: int,
+    min_q2_increase: float,
 ) -> tuple[list[float], list[float], int]:
     """R2X, Q2X, and recommendation for PCA via ``PCA.select_n_components``.
 
     The selector reports the cross-validated R2X (Q2) per component directly in
     its ``q2`` field - PRESS normalised by the same null-model sum-of-squares the
     calibration ``r2_cumulative_`` uses - so R2 and Q2 are directly comparable.
-    ``q2`` is NaN only when the block has no variance to cross-validate.
+    Under the element-wise scheme ``q2`` may legitimately go negative (a
+    component predicting held-out cells worse than their column mean); ``q2`` is
+    rejected only when it is non-finite, which means the block had no variance to
+    cross-validate.
     """
-    selection = PCA.select_n_components(x_block, max_components=max_components, cv=folds)
+    selection = PCA.select_n_components(
+        x_block,
+        max_components=max_components,
+        cv=n_folds,
+        cv_scheme=cv_scheme,
+        n_repeats=n_repeats,
+        selection_rule=selection_rule,
+        min_q2_increase=min_q2_increase,
+        random_state=_RANDOM_STATE,
+    )
     q2_values = np.asarray(selection.q2.to_numpy(), dtype=float)
     if not np.all(np.isfinite(q2_values)):
         msg = "The X block has no variance to cross-validate."
@@ -147,17 +254,35 @@ def _pca_curves(
 
 
 def _pls_curves(
-    x_block: pd.DataFrame, y_block: pd.DataFrame, max_components: int | None, folds: KFold
-) -> tuple[list[float], list[float], int]:
-    """R2Y, Q2Y, and recommendation for PLS via ``PLS.select_n_components``.
+    x_block: pd.DataFrame,
+    y_block: pd.DataFrame,
+    max_components: int | None,
+    n_folds: int,
+    *,
+    selection_rule: SelectionRule,
+    n_repeats: int,
+    min_q2_increase: float,
+) -> tuple[list[float], list[float], int, bool | None]:
+    """R2Y, Q2Y, recommendation, and stability for PLS via ``PLS.select_n_components``.
 
     The selector returns the validated R2Y per component directly (the ``"total"``
     column of ``r2y_validated``); the calibration R2Y is the fitted model's
-    ``r2_cumulative_``.
+    ``r2_cumulative_``. ``selection_is_stable`` reports whether the recommended
+    count was the stable modal choice across the cross-validation repeats.
     """
-    selection = PLS.select_n_components(x_block, y_block, max_components=max_components, cv=folds)
+    selection = PLS.select_n_components(
+        x_block,
+        y_block,
+        max_components=max_components,
+        cv=n_folds,
+        n_repeats=n_repeats,
+        selection_rule=selection_rule,
+        min_q2_increase=min_q2_increase,
+        random_state=_RANDOM_STATE,
+    )
     q2 = [float(v) for v in selection.r2y_validated["total"].to_numpy()]
     a_max = len(q2)
     model = PLS(n_components=a_max, scale=False).fit(x_block, y_block)
     r2 = [float(v) for v in np.asarray(model.r2_cumulative_)[:a_max]]
-    return r2, q2, int(selection.n_components)
+    stable = selection.selection_is_stable
+    return r2, q2, int(selection.n_components), None if stable is None else bool(stable)

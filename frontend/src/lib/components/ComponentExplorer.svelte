@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CrossValidation } from '$lib/api';
+  import type { CrossValidation, CvScheme, SelectionRule } from '$lib/api';
 
   interface Props {
     /** Current component count; changing it applies live (no Apply button). */
@@ -8,6 +8,12 @@
     max: number;
     recommended: number | null;
     cv: CrossValidation | null;
+    /** "PCA" or "PLS" - decides which selection rules / schemes are offered. */
+    kind: string;
+    /** Selected component-selection rule; changing it re-runs cross-validation. */
+    selectionRule: SelectionRule;
+    /** PCA cross-validation scheme; ignored for PLS. */
+    cvScheme: CvScheme;
     /** A live auto-save of the new count is in flight. */
     saving?: boolean;
   }
@@ -17,8 +23,28 @@
     max,
     recommended,
     cv,
+    kind,
+    selectionRule = $bindable(),
+    cvScheme = $bindable(),
     saving = false
   }: Props = $props();
+
+  // Rules each kind supports (PCA has no randomization test), with display labels.
+  const RULE_LABELS: Record<SelectionRule, string> = {
+    '1se': '1-SE (parsimonious)',
+    min: 'Lowest CV error',
+    q2_increment: 'Q² increment',
+    randomization: 'Randomization test'
+  };
+  const rules = $derived<SelectionRule[]>(
+    kind === 'PLS' ? ['1se', 'min', 'q2_increment', 'randomization'] : ['min', '1se', 'q2_increment']
+  );
+  const SCHEME_LABELS: Record<CvScheme, string> = {
+    ekf: 'Element-wise (ekf)',
+    row_wise: 'Row-wise (legacy)'
+  };
+  // The PLS recommendation can flag whether it was stable across CV repeats.
+  const unstable = $derived(cv?.recommended_is_stable === false);
 
   const pct = (v: number | undefined): string =>
     v == null ? '–' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
@@ -72,11 +98,31 @@
         type="button"
         class="rec"
         class:active={components === recommended}
-        title="Cross-validation suggests this many components"
+        title={unstable
+          ? 'Cross-validation suggests this many components, but the choice varied across CV repeats'
+          : 'Cross-validation suggests this many components'}
         onclick={() => (components = clamp(recommended))}
       >
-        ✨ Recommended: {recommended}
+        ✨ Recommended: {recommended}{#if unstable}<span class="warn" title="Unstable across CV repeats">⚠</span>{/if}
       </button>
+    {/if}
+    <label class="rule" title="How the recommended component count is chosen">
+      <span class="k">Rule</span>
+      <select bind:value={selectionRule} aria-label="Selection rule">
+        {#each rules as r (r)}
+          <option value={r}>{RULE_LABELS[r]}</option>
+        {/each}
+      </select>
+    </label>
+    {#if kind === 'PCA'}
+      <label class="rule" title="PCA cross-validation scheme">
+        <span class="k">CV</span>
+        <select bind:value={cvScheme} aria-label="Cross-validation scheme">
+          {#each Object.keys(SCHEME_LABELS) as s (s)}
+            <option value={s}>{SCHEME_LABELS[s as CvScheme]}</option>
+          {/each}
+        </select>
+      </label>
     {/if}
     <span class="saving" class:show={saving}>saving…</span>
   </div>
@@ -206,6 +252,33 @@
     border-color: #dd6b20;
     color: #b85c14;
     background: #fff7ed;
+  }
+  .rec .warn {
+    margin-left: 0.3rem;
+    color: #c05621;
+  }
+  .rule {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.8rem;
+    color: #2b4a66;
+  }
+  .rule .k {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #8a93a0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .rule select {
+    border: 1px solid #cdd7e1;
+    border-radius: 6px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.8rem;
+    background: #fff;
+    color: #2b4a66;
+    cursor: pointer;
   }
   .saving {
     font-size: 0.78rem;
