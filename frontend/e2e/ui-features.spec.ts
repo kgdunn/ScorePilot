@@ -102,6 +102,9 @@ test('component explorer: R²/Q² table highlights the current count', async ({ 
   const table = page.locator('.r2-table');
   await expect(table).toBeVisible();
 
+  // The R²/Q² card names the selection rule and the shaded ±1 SE band.
+  await expect(page.locator('.r2card')).toContainText('SE band');
+
   // The highlighted "current" row matches the fitted count (2).
   const current = table.locator('tr.current');
   await expect(current).toHaveCount(1);

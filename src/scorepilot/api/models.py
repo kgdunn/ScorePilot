@@ -518,10 +518,12 @@ def model_cross_validation(
         component_numbers=cv.component_numbers,
         r2=cv.r2,
         q2=cv.q2,
+        q2_se=cv.q2_se,
         r2_per_component=cv.r2_per_component,
         q2_per_component=cv.q2_per_component,
         recommended=cv.recommended,
         recommended_is_stable=cv.recommended_is_stable,
+        recommended_vote_share=cv.recommended_vote_share,
     )
 
 

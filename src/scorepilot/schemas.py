@@ -355,7 +355,9 @@ class CrossValidationModel(ApiModel):
     component_numbers: list[int]
     r2: list[float]
     q2: list[float]
+    q2_se: list[float]  # half-width of the +/-1 SE band around the Q2 curve
     r2_per_component: list[float]
     q2_per_component: list[float]
     recommended: int
     recommended_is_stable: bool | None  # PLS stability across CV repeats; null otherwise
+    recommended_vote_share: float | None  # PLS modal vote share for `recommended`; null otherwise

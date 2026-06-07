@@ -369,11 +369,15 @@ export interface CrossValidation {
   component_numbers: number[];
   r2: number[];
   q2: number[];
+  /** Half-width of the ±1 SE band around the Q2 curve, per component. */
+  q2_se: number[];
   r2_per_component: number[];
   q2_per_component: number[];
   recommended: number;
   /** Whether the PLS recommendation was stable across CV repeats; null otherwise. */
   recommended_is_stable: boolean | null;
+  /** Fraction of CV repeats that voted for `recommended` (PLS only); null otherwise. */
+  recommended_vote_share: number | null;
 }
 
 /** Options controlling how the recommended component count is chosen. */

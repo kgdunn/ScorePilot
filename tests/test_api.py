@@ -562,6 +562,10 @@ def test_cross_validation_reports_rule_metadata(client: TestClient) -> None:
     assert body["cv_scheme"] == "ekf"
     assert body["n_repeats"] == 1
     assert body["recommended_is_stable"] is None
+    assert body["recommended_vote_share"] is None
+    # The +/-1 SE band is aligned to the Q2 curve and non-negative.
+    assert len(body["q2_se"]) == len(body["q2"])
+    assert all(s >= 0.0 for s in body["q2_se"])
 
 
 def test_cross_validation_honours_selection_rule(client: TestClient) -> None:
