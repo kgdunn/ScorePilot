@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scorepilot"
-version = "0.20.0"
+version = "0.21.0"
 description = "Web-based tool for PCA/PLS model analysis in chemometrics."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -27,7 +27,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "python-multipart>=0.0.9",
-    "process-improve>=1.38,<2",
+    "process-improve>=1.39,<2",
     "pandas>=2.2",
     "numpy>=1.26",
     "openpyxl>=3.1.5",

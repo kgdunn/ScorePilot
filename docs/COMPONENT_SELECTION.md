@@ -38,7 +38,7 @@ It calls `PCA.select_n_components` / `PLS.select_n_components`, then adapts thei
 | field | meaning |
 | --- | --- |
 | `r2` / `q2` | cumulative calibration R² and cross-validated R² (Q²) per component |
-| `q2_se` | half-width of the ±1 SE band around the Q² curve (see caveat below) |
+| `q2_se` | half-width of the ±1 SE band around the Q² curve (from the selector's `q2_se`) |
 | `r2_per_component` / `q2_per_component` | marginal (per-component) gains |
 | `selection_rule` | rule used to pick `recommended` |
 | `cv_scheme` | PCA scheme (`ekf` / `row_wise`); `null` for PLS |
@@ -94,27 +94,18 @@ The band is a generic capability added to the reusable plot library
 (`lib/plots`): `LineSeries.band?` renders a shaded ±band via the canonical
 stacked-area ECharts pair, so it stays free of ScorePilot concepts.
 
-## Caveat: the Q² standard-error adapter (flagged)
+## Where `q2_se` comes from
 
-`process-improve` reports the cross-validated error and its standard error on the
-**PRESS / RMSECV** scale (`se_press`, `se_rmsecv`), but ScorePilot plots **Q²**.
-`core/cross_validation.py::_q2_standard_error` converts: since
-`Q² = 1 - PRESS / SS_null` and `SS_null` is a single constant across component
-counts, a PRESS standard error maps to the Q² scale by dividing by that constant
-(recovered as the median of `PRESS / (1 - Q²)` over components). For PLS the
-RMSECV SE is first turned into a PRESS SE via `PRESS = N · RMSECV²`
-(`se_press / press = 2 · se_rmsecv / rmsecv`).
-
-This is a unit change on a value the library already computed, **not** a
-reimplementation of the cross-validation - but it is the one piece of local
-statistics in this feature. **Preferred fix: have `process-improve` expose a
-per-component Q² standard error directly**, then delete `_q2_standard_error`.
-(See open items.)
+`process-improve` plots / reports the cross-validated error on the **PRESS /
+RMSECV** scale, but it also exposes a per-component **`q2_se`** (>= 1.39) - the
+standard error already mapped onto the **Q²** scale (the half-width of a ±1 SE
+band around the validated Q² curve). ScorePilot reads that field directly
+(`core/cross_validation.py::_q2_se_list`); there is no local Q²-SE statistics
+code. This was originally a flagged local adapter here; it was upstreamed in
+`process-improve` PR #410 and the adapter was deleted.
 
 ## Open items / TODO
 
-- [ ] **Upstream a Q² standard error** in `process-improve`'s selectors so the
-      local `_q2_standard_error` adapter can be removed (see caveat above).
 - [ ] **Surface the randomization p-values** (`randomization_pvalues`) in the UI
       when the PLS `randomization` rule is selected - the adapter currently drops
       them; they would make a useful per-component significance annotation.
