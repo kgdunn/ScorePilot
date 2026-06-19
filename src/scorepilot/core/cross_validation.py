@@ -31,10 +31,11 @@ repeats (whether the modal choice cleared the stability threshold, and its vote
 share). The standard error is taken straight from the selector's ``q2_se`` field
 (``process_improve`` >= 1.39); ScorePilot no longer derives it locally.
 
-The selectors re-fit the centring/scaling inside each training fold
-(``scale_inside_folds=True``), so passing the already-centered/scaled output of
+By default the selectors re-fit the centring/scaling inside each training fold
+(``process_improve``'s ``scale_inside_folds=True`` default, which ScorePilot does
+not override), so passing the already-centered/scaled output of
 :func:`apply_spec` is harmless (re-scaling already-scaled data is close to a
-no-op) and the reported errors no longer leak the full-dataset scaling into the
+no-op) and the reported errors do not leak the full-dataset scaling into the
 held-out rows.
 """
 
