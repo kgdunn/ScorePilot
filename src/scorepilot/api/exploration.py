@@ -111,7 +111,7 @@ def get_grid(
         Query(description='JSON map of column -> {"kind", "c1", "c2"} applied in scaled view'),
     ] = None,
 ) -> GridWindow:
-    """Return a windowed block of cells for the grid, raw or autoscaled.
+    """Return a windowed block of cells for the grid, raw or scaled.
 
     In the scaled view, the draft spec's per-variable transforms (passed as a JSON
     ``transforms`` map) are applied before scaling, so the table matches the scaled
