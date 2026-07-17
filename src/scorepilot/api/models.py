@@ -334,7 +334,8 @@ def get_model(
     """Return a model's Logbook: metadata, recipe, lineage, and diagnostics.
 
     Diagnostics are recomputed from the source dataset and stored spec. If the
-    dataset is no longer in memory, the entry is returned without diagnostics.
+    dataset is no longer available (the source dataset record is missing or
+    deleted), the entry is returned without diagnostics.
 
     ``n_components`` previews the diagnostics at a different component count
     without persisting it - this backs the live component explorer, which scrubs
@@ -383,7 +384,7 @@ def update_model(
     if dataset is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Source dataset is no longer loaded; cannot refit.",
+            detail="Source dataset is no longer available; cannot refit.",
         )
 
     spec = PreprocessingSpec.from_dict(model.preprocessing)
@@ -424,7 +425,7 @@ def model_contributions(
     if dataset is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Source dataset is no longer loaded; cannot compute contributions.",
+            detail="Source dataset is no longer available; cannot compute contributions.",
         )
 
     spec = PreprocessingSpec.from_dict(model.preprocessing)
@@ -486,7 +487,7 @@ def model_cross_validation(
     if dataset is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Source dataset is no longer loaded; cannot cross-validate.",
+            detail="Source dataset is no longer available; cannot cross-validate.",
         )
 
     ceiling = min(max_components or model.n_components, _AUTO_MAX_COMPONENTS)
