@@ -302,8 +302,9 @@ class FitModelRequest(ApiModel):
 
     With ``auto_components`` the number of components is chosen by
     cross-validation via the selected ``selection_rule`` (the one-standard-error
-    rule for PLS and the lowest cross-validated error for PCA, by default), and
-    ``n_components`` is used only as an upper bound on what is evaluated.
+    rule for PLS and the lowest cross-validated error for PCA, by default).
+    When ``auto_components`` is set, the request's ``n_components`` is ignored;
+    cross-validation evaluates up to a fixed internal ceiling.
     """
 
     dataset_id: str
