@@ -172,9 +172,10 @@ def cross_validate(
     Raises
     ------
     ValueError
-        For an unknown ``kind``, a PLS request without Y columns, an unsupported
-        ``selection_rule`` for the kind, or data the underlying selector cannot
-        cross-validate (including rank-deficient / collinear folds).
+        For an unknown ``kind``, fewer than two observations in ``x_block``, a
+        PLS request without Y columns, an unsupported ``selection_rule`` for the
+        kind, or data the underlying selector cannot cross-validate (including
+        rank-deficient / collinear folds).
     """
     if kind not in ("PCA", "PLS"):
         msg = f"Unknown model kind: {kind!r} (expected 'PCA' or 'PLS')"
