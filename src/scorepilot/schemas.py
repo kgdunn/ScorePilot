@@ -300,10 +300,11 @@ class ContributionsModel(ApiModel):
 class FitModelRequest(ApiModel):
     """Request to fit a model variant from a dataset and a preprocessing spec.
 
-    With ``auto_components`` the number of components is chosen by
-    cross-validation via the selected ``selection_rule`` (the one-standard-error
-    rule for PLS and the lowest cross-validated error for PCA, by default), and
-    ``n_components`` is used only as an upper bound on what is evaluated.
+    With ``auto_components=True`` the ``n_components`` field is ignored:
+    cross-validation picks the count via the selected ``selection_rule`` (the
+    one-standard-error rule for PLS and the lowest cross-validated error for
+    PCA, by default), up to the hard-coded ``_AUTO_MAX_COMPONENTS = 20``
+    ceiling in :mod:`scorepilot.api.models`.
     """
 
     dataset_id: str
