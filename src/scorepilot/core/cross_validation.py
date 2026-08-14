@@ -312,10 +312,10 @@ def _pls_curves(
 
     The selector returns the validated R2Y per component directly (the ``"total"``
     column of ``r2y_validated``); the calibration R2Y is the fitted model's
-    ``r2_cumulative_``. ``selection_is_stable`` reports whether the recommended
-    count was the stable modal choice across the cross-validation repeats, and
-    ``selection_distribution`` gives the per-count vote share. The +/-1 SE band is
-    the selector's ``q2_se`` (the per-fold total-PRESS standard error on the Q2
+    ``r2_cumulative_``. ``stable`` reports whether the recommended count was the
+    stable modal choice across the cross-validation repeats, and ``vote_share``
+    gives the recommended count's share of votes. The +/-1 SE band is the
+    selector's ``q2_se`` (the per-fold total-PRESS standard error on the Q2
     scale).
     """
     selection = PLS.select_n_components(
