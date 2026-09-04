@@ -153,8 +153,9 @@ def cross_validate(
     max_components
         Largest component count to evaluate. Defaults to the data's rank.
     n_splits
-        Number of K-fold splits (clamped to the number of observations). For PCA
-        under the element-wise scheme this is the number of element folds.
+        Number of K-fold splits, clamped to the range ``[2, n_observations]``.
+        For PCA under the element-wise scheme this is the number of element
+        folds.
     selection_rule
         Which rule chooses the recommended component count (see
         :data:`SelectionRule`). Defaults to ``"1se"`` for PLS and ``"min"`` for
