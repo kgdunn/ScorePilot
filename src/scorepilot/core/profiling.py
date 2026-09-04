@@ -142,9 +142,11 @@ def sequence(series: pd.Series) -> list[float | None]:
 def suggest_transform(summary: VariableSummary) -> TransformKind:
     """Suggest a transform from a variable's shape.
 
-    A strongly right-skewed, strictly positive variable with a wide dynamic range
-    is a candidate for a log transform; a milder skew suggests a signed power
-    (root). Otherwise no transform is suggested.
+    A strongly right-skewed (skewness > 1) variable is a candidate for
+    transformation: when it is also strictly positive and has a wide dynamic
+    range (min-max ratio > 20) a log transform is suggested; otherwise a signed
+    power (root) is proposed as a milder alternative. A variable that is not
+    strongly skewed gets no suggestion.
     """
     if summary.column_type is not ColumnType.QUANTITATIVE or summary.skewness is None:
         return TransformKind.NONE

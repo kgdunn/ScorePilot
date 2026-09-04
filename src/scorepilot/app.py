@@ -48,8 +48,10 @@ def _basic_auth_ok(header: str | None, username: str, password: str) -> bool:
 class SpaStaticFiles(StaticFiles):
     """Static files that fall back to ``index.html`` on a 404.
 
-    This lets the single-page app own client-side routing while non-existent
-    asset paths still return a real 404.
+    This lets the single-page app own client-side routing: any path that does
+    not match a static asset is served the SPA shell so the client-side router
+    can resolve it. (API routes are mounted before this handler, so a missing
+    ``/api/*`` still returns its own 404.)
 
     Cache policy avoids the stale-SPA trap (notably on iOS Safari): the HTML
     shell is served ``no-cache`` so a new deploy is picked up immediately, while
