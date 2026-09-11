@@ -96,11 +96,14 @@ class CrossValidation:
     q2_per_component: list[float]
     recommended: int  # component count recommended by the library's selector
     # Whether the PLS recommendation was stable across CV repeats (the modal
-    # vote share cleared the selector's stability threshold). ``None`` when not
-    # applicable (PCA, or a rule that does not vote across repeats).
+    # vote share cleared the selector's stability threshold). Only the ``"1se"``
+    # and ``"randomization"`` rules vote across repeats, so this is non-None
+    # only for those two rules; ``"min"`` and ``"q2_increment"`` (and any PCA
+    # rule) always produce ``None``.
     recommended_is_stable: bool | None
     # Fraction of CV repeats that voted for ``recommended`` (PLS only; the modal
-    # vote share). ``None`` for PCA or rules that do not vote across repeats.
+    # vote share). Non-None only for the ``"1se"`` and ``"randomization"``
+    # rules; ``"min"`` and ``"q2_increment"`` (and PCA) always produce ``None``.
     recommended_vote_share: float | None
 
 
