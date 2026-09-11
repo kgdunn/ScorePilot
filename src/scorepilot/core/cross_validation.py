@@ -32,10 +32,12 @@ share). The standard error is taken straight from the selector's ``q2_se`` field
 (``process_improve`` >= 1.39); ScorePilot no longer derives it locally.
 
 The selectors re-fit the centring/scaling inside each training fold
-(``scale_inside_folds=True``), so passing the already-centered/scaled output of
-:func:`apply_spec` is harmless (re-scaling already-scaled data is close to a
-no-op) and the reported errors no longer leak the full-dataset scaling into the
-held-out rows.
+(``scale_inside_folds=True``), so the reported errors do not leak the
+full-dataset scaling into the held-out rows. Passing the already-centered/scaled
+output of :func:`apply_spec` produces a numerically-close-to-identity rescale
+inside each fold, but ``process_improve`` emits a warning when it sees data that
+is already centred and scaled to unit variance under ``scale_inside_folds=True``
+- so the pairing works, but it is not silent.
 """
 
 from __future__ import annotations
