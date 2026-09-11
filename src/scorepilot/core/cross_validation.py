@@ -32,10 +32,12 @@ share). The standard error is taken straight from the selector's ``q2_se`` field
 (``process_improve`` >= 1.39); ScorePilot no longer derives it locally.
 
 The selectors re-fit the centring/scaling inside each training fold
-(``scale_inside_folds=True``), so passing the already-centered/scaled output of
-:func:`apply_spec` is harmless (re-scaling already-scaled data is close to a
-no-op) and the reported errors no longer leak the full-dataset scaling into the
-held-out rows.
+(``scale_inside_folds=True``), so the reported errors do not leak the
+full-dataset scaling into the held-out rows. Passing the already-centered/scaled
+output of :func:`apply_spec` produces a numerically-close-to-identity rescale
+inside each fold, but ``process_improve`` emits a warning when it sees data that
+is already centred and scaled to unit variance under ``scale_inside_folds=True``
+- so the pairing works, but it is not silent.
 """
 
 from __future__ import annotations
@@ -96,11 +98,14 @@ class CrossValidation:
     q2_per_component: list[float]
     recommended: int  # component count recommended by the library's selector
     # Whether the PLS recommendation was stable across CV repeats (the modal
-    # vote share cleared the selector's stability threshold). ``None`` when not
-    # applicable (PCA, or a rule that does not vote across repeats).
+    # vote share cleared the selector's stability threshold). Only the ``"1se"``
+    # and ``"randomization"`` rules vote across repeats, so this is non-None
+    # only for those two rules; ``"min"`` and ``"q2_increment"`` (and any PCA
+    # rule) always produce ``None``.
     recommended_is_stable: bool | None
     # Fraction of CV repeats that voted for ``recommended`` (PLS only; the modal
-    # vote share). ``None`` for PCA or rules that do not vote across repeats.
+    # vote share). Non-None only for the ``"1se"`` and ``"randomization"``
+    # rules; ``"min"`` and ``"q2_increment"`` (and PCA) always produce ``None``.
     recommended_vote_share: float | None
 
 
@@ -153,8 +158,9 @@ def cross_validate(
     max_components
         Largest component count to evaluate. Defaults to the data's rank.
     n_splits
-        Number of K-fold splits (clamped to the number of observations). For PCA
-        under the element-wise scheme this is the number of element folds.
+        Number of K-fold splits (clamped between 2 and the number of
+        observations). For PCA under the element-wise scheme this is the number
+        of element folds.
     selection_rule
         Which rule chooses the recommended component count (see
         :data:`SelectionRule`). Defaults to ``"1se"`` for PLS and ``"min"`` for
@@ -172,9 +178,10 @@ def cross_validate(
     Raises
     ------
     ValueError
-        For an unknown ``kind``, a PLS request without Y columns, an unsupported
-        ``selection_rule`` for the kind, or data the underlying selector cannot
-        cross-validate (including rank-deficient / collinear folds).
+        For an unknown ``kind``, fewer than two observations in ``x_block``, a
+        PLS request without Y columns, an unsupported ``selection_rule`` for the
+        kind, or data the underlying selector cannot cross-validate (including
+        rank-deficient / collinear folds).
     """
     if kind not in ("PCA", "PLS"):
         msg = f"Unknown model kind: {kind!r} (expected 'PCA' or 'PLS')"
@@ -310,10 +317,12 @@ def _pls_curves(
 ) -> _Curves:
     """R2Y, Q2Y, the Q2 standard error, recommendation, and stability for PLS.
 
-    The selector returns the validated R2Y per component directly (the ``"total"``
-    column of ``r2y_validated``); the calibration R2Y is the fitted model's
-    ``r2_cumulative_``. ``selection_is_stable`` reports whether the recommended
-    count was the stable modal choice across the cross-validation repeats, and
+    The selector returns the cumulative validated R2Y at each component count
+    (the ``"total"`` column of ``r2y_validated``); per-component increments are
+    derived from it by :func:`_cumulative_diffs` at the call site. The
+    calibration R2Y is the fitted model's ``r2_cumulative_``.
+    ``selection_is_stable`` reports whether the recommended count was the stable
+    modal choice across the cross-validation repeats, and
     ``selection_distribution`` gives the per-count vote share. The +/-1 SE band is
     the selector's ``q2_se`` (the per-fold total-PRESS standard error on the Q2
     scale).
