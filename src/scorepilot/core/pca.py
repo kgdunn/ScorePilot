@@ -46,7 +46,8 @@ class PCAResult:
     hotellings_t2
         Hotelling's T^2 per observation using all components.
     spe
-        Squared prediction error (DModX) per observation using all components.
+        Squared prediction error per observation using all components, closely
+        related to DModX (a scaled version of SPE).
     t2_limit, spe_limit
         Upper control limits for T^2 and SPE at ``conf_level``.
     """
