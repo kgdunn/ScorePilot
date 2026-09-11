@@ -312,10 +312,12 @@ def _pls_curves(
 ) -> _Curves:
     """R2Y, Q2Y, the Q2 standard error, recommendation, and stability for PLS.
 
-    The selector returns the validated R2Y per component directly (the ``"total"``
-    column of ``r2y_validated``); the calibration R2Y is the fitted model's
-    ``r2_cumulative_``. ``selection_is_stable`` reports whether the recommended
-    count was the stable modal choice across the cross-validation repeats, and
+    The selector returns the cumulative validated R2Y at each component count
+    (the ``"total"`` column of ``r2y_validated``); per-component increments are
+    derived from it by :func:`_cumulative_diffs` at the call site. The
+    calibration R2Y is the fitted model's ``r2_cumulative_``.
+    ``selection_is_stable`` reports whether the recommended count was the stable
+    modal choice across the cross-validation repeats, and
     ``selection_distribution`` gives the per-count vote share. The +/-1 SE band is
     the selector's ``q2_se`` (the per-fold total-PRESS standard error on the Q2
     scale).
