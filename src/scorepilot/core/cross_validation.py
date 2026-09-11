@@ -153,8 +153,9 @@ def cross_validate(
     max_components
         Largest component count to evaluate. Defaults to the data's rank.
     n_splits
-        Number of K-fold splits (clamped to the number of observations). For PCA
-        under the element-wise scheme this is the number of element folds.
+        Number of K-fold splits (clamped between 2 and the number of
+        observations). For PCA under the element-wise scheme this is the number
+        of element folds.
     selection_rule
         Which rule chooses the recommended component count (see
         :data:`SelectionRule`). Defaults to ``"1se"`` for PLS and ``"min"`` for
@@ -172,9 +173,10 @@ def cross_validate(
     Raises
     ------
     ValueError
-        For an unknown ``kind``, a PLS request without Y columns, an unsupported
-        ``selection_rule`` for the kind, or data the underlying selector cannot
-        cross-validate (including rank-deficient / collinear folds).
+        For an unknown ``kind``, fewer than two observations in ``x_block``, a
+        PLS request without Y columns, an unsupported ``selection_rule`` for the
+        kind, or data the underlying selector cannot cross-validate (including
+        rank-deficient / collinear folds).
     """
     if kind not in ("PCA", "PLS"):
         msg = f"Unknown model kind: {kind!r} (expected 'PCA' or 'PLS')"
