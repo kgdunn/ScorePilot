@@ -195,9 +195,11 @@ def _is_sequential_identifier(name: str | None, series: pd.Series) -> bool:
     """Whether the primary identifier is "truly sequential" (issue #59).
 
     The synthetic ``Row`` counter (and the implicit row index) are sequential, as
-    is any integer identifier that is a constant-step arithmetic run (a row
-    counter under a different name). A labelled identifier is not: its values
-    carry meaning and should be shown rather than collapsed to ``1..n``.
+    is any integer identifier that is an arithmetic run with a constant non-zero
+    step (a row counter under a different name); both ascending and descending
+    runs qualify, and a constant column (zero step) does not. A labelled
+    identifier is not sequential: its values carry meaning and should be shown
+    rather than collapsed to ``1..n``.
     """
     if name is None or name == SYNTHETIC_ID_NAME:
         return True
