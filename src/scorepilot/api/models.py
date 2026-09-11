@@ -334,7 +334,9 @@ def get_model(
     """Return a model's Logbook: metadata, recipe, lineage, and diagnostics.
 
     Diagnostics are recomputed from the source dataset and stored spec. If the
-    dataset is no longer in memory, the entry is returned without diagnostics.
+    source dataset has been deleted, or if refitting fails (e.g. a spec now
+    selects no X columns), diagnostics are omitted and the entry is returned
+    without them.
 
     ``n_components`` previews the diagnostics at a different component count
     without persisting it - this backs the live component explorer, which scrubs
@@ -471,11 +473,11 @@ def model_cross_validation(
     Q2 the cross-validated (out-of-sample) prediction, with the recommended
     component count flagged.
 
-    ``max_components`` extends the curve beyond the model's current count (capped
-    at the auto-fit ceiling) so the component explorer can show the diminishing
-    returns of adding more. ``selection_rule`` (and, for PCA, ``cv_scheme``)
-    choose how the recommended count is picked; ``n_repeats`` and
-    ``min_q2_increase`` tune the cross-validation.
+    ``max_components`` overrides the model's current component count (capped at
+    the auto-fit ceiling); pass a larger value to see diminishing returns beyond
+    the fitted count, or a smaller value to trim the curve. ``selection_rule``
+    (and, for PCA, ``cv_scheme``) choose how the recommended count is picked;
+    ``n_repeats`` and ``min_q2_increase`` tune the cross-validation.
     """
     model = repository.get(model_id)
     if model is None:
