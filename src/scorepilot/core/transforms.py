@@ -48,7 +48,10 @@ def apply_transform(
     - ``neglog``: ``sign(x) * log1p(abs(x))`` (sign-symmetric log)
     - ``logit``: ``log(p / (1 - p))`` with ``p = x`` (defined for ``0 < x < 1``)
     - ``exponential``: ``exp(x)``
-    - ``power``: ``sign(x) * abs(x) ** c1`` (default ``c1 = 0.5``, i.e. signed root)
+    - ``power``: ``sign(x) * abs(x) ** c1``. ``c1`` is treated as ``0.5`` when it
+      is exactly ``0.0`` (the parameter's default), so the default is signed
+      square root; any other value of ``c1`` (including negative exponents) is
+      passed through unchanged.
     """
     values = to_numeric(series).astype(float).to_numpy()
 
