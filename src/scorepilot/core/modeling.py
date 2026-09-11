@@ -51,11 +51,16 @@ def _fit_estimator(
 ) -> PCA | PLS:
     """Validate inputs and fit the underlying PCA/PLS estimator.
 
+    The first failing precondition raises: ``n_components`` is validated first,
+    then (for PLS) the Y block, and ``kind`` is validated last, so a call with
+    an unknown ``kind`` and an out-of-range ``n_components`` surfaces the
+    component-count error rather than the kind error.
+
     Raises
     ------
     ValueError
-        For an unknown ``kind``, a PLS fit without Y columns, or an out-of-range
-        ``n_components``.
+        For an out-of-range ``n_components``, a PLS fit without Y columns, or an
+        unknown ``kind``.
     """
     max_components = min(x_block.shape)
     if not 1 <= n_components <= max_components:
