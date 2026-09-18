@@ -471,10 +471,11 @@ def model_cross_validation(
     Q2 the cross-validated (out-of-sample) prediction, with the recommended
     component count flagged.
 
-    ``max_components`` extends the curve beyond the model's current count (capped
-    at the auto-fit ceiling) so the component explorer can show the diminishing
-    returns of adding more. ``selection_rule`` (and, for PCA, ``cv_scheme``)
-    choose how the recommended count is picked; ``n_repeats`` and
+    ``max_components`` sets the ceiling on the number of components evaluated
+    (capped at the auto-fit ceiling): pass a value above the model's current
+    count to extend the curve, or below it to shorten it. When omitted the sweep
+    stops at the model's current count. ``selection_rule`` (and, for PCA,
+    ``cv_scheme``) choose how the recommended count is picked; ``n_repeats`` and
     ``min_q2_increase`` tune the cross-validation.
     """
     model = repository.get(model_id)
