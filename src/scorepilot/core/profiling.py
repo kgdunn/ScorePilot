@@ -143,8 +143,10 @@ def suggest_transform(summary: VariableSummary) -> TransformKind:
     """Suggest a transform from a variable's shape.
 
     A strongly right-skewed, strictly positive variable with a wide dynamic range
-    is a candidate for a log transform; a milder skew suggests a signed power
-    (root). Otherwise no transform is suggested.
+    is a candidate for a log transform; a strongly skewed variable that does not
+    qualify for the log (for example because it has non-positive values or a
+    narrow dynamic range) falls back to a signed power (root). Variables that
+    are not strongly skewed get no transform.
     """
     if summary.column_type is not ColumnType.QUANTITATIVE or summary.skewness is None:
         return TransformKind.NONE
