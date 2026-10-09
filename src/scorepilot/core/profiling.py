@@ -20,11 +20,12 @@ _TEXT_PARSE_THRESHOLD = 0.8
 
 
 def infer_column_type(series: pd.Series) -> ColumnType:
-    """Infer whether a column is quantitative, qualitative, or a date/time.
+    """Infer whether a column is quantitative, qualitative, a date/time, or unknown.
 
     Numeric and boolean dtypes are decided directly. For text columns we try to
     parse the non-missing values as numbers, then as dates; a column is treated as
-    quantitative or datetime only if at least 80% of its values parse.
+    quantitative or datetime only if at least 80% of its values parse. A column
+    with no non-missing values is reported as :attr:`ColumnType.UNKNOWN`.
     """
     if pd.api.types.is_datetime64_any_dtype(series):
         return ColumnType.DATETIME
@@ -143,8 +144,9 @@ def suggest_transform(summary: VariableSummary) -> TransformKind:
     """Suggest a transform from a variable's shape.
 
     A strongly right-skewed, strictly positive variable with a wide dynamic range
-    is a candidate for a log transform; a milder skew suggests a signed power
-    (root). Otherwise no transform is suggested.
+    is a candidate for a log transform. A strongly skewed variable that does not
+    meet both the strictly-positive and wide-range conditions falls back to a
+    signed power (root). Otherwise no transform is suggested.
     """
     if summary.column_type is not ColumnType.QUANTITATIVE or summary.skewness is None:
         return TransformKind.NONE

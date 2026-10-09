@@ -153,8 +153,9 @@ def cross_validate(
     max_components
         Largest component count to evaluate. Defaults to the data's rank.
     n_splits
-        Number of K-fold splits (clamped to the number of observations). For PCA
-        under the element-wise scheme this is the number of element folds.
+        Number of K-fold splits. Clamped to the range ``[2, n_observations]``
+        before use. For PCA under the element-wise scheme this is the number of
+        element folds.
     selection_rule
         Which rule chooses the recommended component count (see
         :data:`SelectionRule`). Defaults to ``"1se"`` for PLS and ``"min"`` for
@@ -166,8 +167,9 @@ def cross_validate(
         How many times to repeat the (shuffled) cross-validation. Defaults to
         10 for PLS (the 1-SE rule needs the repeats) and 1 for PCA.
     min_q2_increase
-        Threshold for the ``"q2_increment"`` rule; ignored by other rules.
-        Defaults to the library's value.
+        Marginal-Q2 threshold for the ``"q2_increment"`` rule; ignored by other
+        rules. Defaults to ``0.01`` (one percentage point of predicted variance),
+        mirroring ``process_improve``'s own default.
 
     Raises
     ------
