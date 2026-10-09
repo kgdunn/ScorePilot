@@ -322,7 +322,11 @@ class FitModelRequest(ApiModel):
 
 
 class UpdateModelRequest(ApiModel):
-    """Patch a model's tunable hyperparameters in place (no refit-from-scratch)."""
+    """Patch a model's tunable hyperparameters in place (keeping its id and lineage).
+
+    The backend refits the model with the new ``n_components`` under its stored
+    preprocessing recipe; identity, parent, and dataset are preserved.
+    """
 
     n_components: int = Field(ge=1)
 

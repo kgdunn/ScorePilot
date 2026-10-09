@@ -222,7 +222,8 @@ def inspect_variable(
     form: Annotated[str, Query(pattern="^(raw|scaled)$")] = "raw",
     excluded_rows: Annotated[list[int] | None, Query()] = None,
 ) -> VariableInspector:
-    """Return summary, histogram, and sequence for a variable (with optional preview).
+    """Return summary stats, histogram, sequence, and a suggested transform for a
+    variable (with per-row primary-identifier labels and an optional preview).
 
     When ``form=scaled`` the quantitative column is mean-centered and scaled to unit
     variance (after any transform), so the distribution and sequence match the grid's
