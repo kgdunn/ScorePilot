@@ -32,7 +32,11 @@ def apply_transform(
         Which transform to apply.
     c1, c2
         Transform constants. Their meaning depends on ``kind`` (see Notes); the
-        defaults reproduce the textbook form of each transform.
+        defaults reproduce the textbook form of each transform. For every branch
+        except ``power``, ``c1=0.0`` is an ordinary numeric default. For
+        ``power`` it is a sentinel meaning "use ``0.5``" (the textbook signed
+        root): the function remaps ``c1 == 0.0`` to an exponent of ``0.5``, so
+        pass an explicit non-zero ``c1`` to use any other exponent.
 
     Returns
     -------
@@ -48,7 +52,8 @@ def apply_transform(
     - ``neglog``: ``sign(x) * log1p(abs(x))`` (sign-symmetric log)
     - ``logit``: ``log(p / (1 - p))`` with ``p = x`` (defined for ``0 < x < 1``)
     - ``exponential``: ``exp(x)``
-    - ``power``: ``sign(x) * abs(x) ** c1`` (default ``c1 = 0.5``, i.e. signed root)
+    - ``power``: ``sign(x) * abs(x) ** c1`` (default exponent ``0.5``, i.e. signed
+      root, selected via the ``c1 == 0.0`` sentinel in the signature)
     """
     values = to_numeric(series).astype(float).to_numpy()
 
