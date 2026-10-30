@@ -47,10 +47,12 @@ class DatasetRecord(Base):
 class Model(Base):
     """A fitted PCA/PLS model variant.
 
-    Queryable metadata lives in real columns and JSON; the fitted arrays (P, W,
-    means, scales, ...) are stored as a compressed ``npz`` blob in ``params``. If
-    those artifacts grow, ``params`` can be swapped for an object-storage path
-    behind the same repository method without changing anything upstream.
+    Queryable metadata lives in real columns and JSON; a small ``npz`` blob of
+    fitted arrays - currently the X-loadings, per-component explained variance,
+    and cumulative R2 - is stored in ``params``. The on-demand diagnostics
+    endpoint refits from the source dataset and stored spec, so ``params`` is a
+    minimal archival snapshot that can be swapped for an object-storage path
+    behind the same repository method if it grows.
     """
 
     __tablename__ = "model"
