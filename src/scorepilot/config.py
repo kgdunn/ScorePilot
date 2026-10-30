@@ -26,6 +26,18 @@ class Settings(BaseSettings):
     agent_enabled, agent_api_key, agent_base_url, agent_model_name
         Optional T^2-D2 assistant configuration. The agent is off by default and
         the analysis features never depend on it.
+    auth_username, auth_password
+        Optional HTTP Basic auth gate. The gate is inactive until
+        ``auth_password`` is set, so a local launch needs no login; set a
+        password on a public deploy to require auth across the whole app.
+    docs_enabled
+        Whether the interactive API docs (``/api/docs`` + OpenAPI) are served.
+        Default on; deployers can turn it off to shrink the public surface.
+    max_upload_mb
+        Byte cap, in megabytes, on a single uploaded or fetched request body.
+    max_cells
+        Cap on the number of cells in a parsed table, so a small but highly
+        compressed file (e.g. an ``.xlsx``) cannot expand without limit.
     """
 
     model_config = SettingsConfigDict(

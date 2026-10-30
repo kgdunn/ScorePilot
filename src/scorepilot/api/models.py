@@ -334,7 +334,8 @@ def get_model(
     """Return a model's Logbook: metadata, recipe, lineage, and diagnostics.
 
     Diagnostics are recomputed from the source dataset and stored spec. If the
-    dataset is no longer in memory, the entry is returned without diagnostics.
+    source dataset is no longer available (never set, or its record is gone),
+    the entry is returned without diagnostics.
 
     ``n_components`` previews the diagnostics at a different component count
     without persisting it - this backs the live component explorer, which scrubs
