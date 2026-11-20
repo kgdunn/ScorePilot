@@ -115,9 +115,11 @@ class AppliedWorkset:
 def apply_spec(df: pd.DataFrame, spec: PreprocessingSpec) -> AppliedWorkset:
     """Apply a preprocessing spec to a dataset, returning the X (and Y) matrices.
 
-    Columns are coerced to numeric, transformed per the spec, then mean-centered
-    and scaled. Excluded rows and columns are dropped. The result needs no further
-    scaling before fitting.
+    Columns are coerced to numeric, transformed per the spec, and mean-centered.
+    Each column is then scaled according to its :class:`ScalingKind`
+    (``unit_variance``, ``pareto``, or ``none`` for centre-only), falling back to
+    ``spec.default_scaling`` when no per-variable override is set. Excluded rows
+    and columns are dropped. The result is ready to fit with no further scaling.
 
     Raises
     ------
